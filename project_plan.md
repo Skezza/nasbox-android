@@ -5,7 +5,8 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ## Delivery principles
 ## Current execution status
 - ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
-- ⏳ Phase 1 — Persistence foundation: **Next**.
+- ✅ Phase 1 — Persistence foundation: **Completed**.
+- ⏳ Phase 2 — Credential security and Vault management: **Next**.
 
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
@@ -50,6 +51,12 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - CRUD flows work for servers and plans.
 - Run and log entities can be persisted and queried.
 - Backup record uniqueness is enforced per plan + media item.
+
+### Implementation status
+- ✅ Completed: Room and KSP are integrated in the app module.
+- ✅ Completed: entities for servers, plans, backup records, runs, and run logs are implemented with foreign keys and indexing.
+- ✅ Completed: DAO surfaces and repository abstractions are in place for Phase 2+ feature work.
+- ✅ Completed: baseline persistence tests validate CRUD, run/log persistence, and unique backup proof constraints.
 
 ---
 

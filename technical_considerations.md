@@ -201,6 +201,12 @@ Each mapped error should provide:
 - DAO tests for key persistence constraints and queries.
 - End-to-end manual QA flow: add server -> test -> create plan -> run -> re-run skip behavior.
 
+## Phase 1 implementation notes
+- Persistence foundation now includes Room entities for servers, plans, backup records, runs, and run logs.
+- Referential integrity is enforced with foreign keys between plans/servers, records/plans, runs/plans, and logs/runs.
+- Duplicate backup proof prevention is enforced with a unique index on `(plan_id, media_item_id)`.
+- Baseline persistence tests are expected to remain in place as Phase 2+ introduces secure credential and sync logic.
+
 ---
 
 ## Key implementation risks and mitigations
