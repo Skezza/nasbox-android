@@ -3,6 +3,10 @@
 This plan sequences delivery into reviewable phases while keeping the app functional after every phase.
 
 ## Delivery principles
+## Current execution status
+- ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
+- ⏳ Phase 1 — Persistence foundation: **Next**.
+
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
 - Validate phase exit criteria before advancing.
@@ -23,6 +27,11 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Exit criteria
 - App launches and navigates correctly across all primary and editor routes.
 - Placeholder actions are connected and predictable.
+
+### Implementation status
+- ✅ Completed: bottom navigation routes for Dashboard, Plans, and Vault are wired.
+- ✅ Completed: plan editor, server editor, and optional run detail placeholder routes are implemented.
+- ✅ Completed: placeholder actions navigate to the expected destinations and return paths are functional.
 
 ---
 
