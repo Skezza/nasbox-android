@@ -207,6 +207,12 @@ Each mapped error should provide:
 - Duplicate backup proof prevention is enforced with a unique index on `(plan_id, media_item_id)`.
 - Baseline persistence tests are expected to remain in place as Phase 2+ introduces secure credential and sync logic.
 
+## Phase 2 implementation notes
+- Vault management now uses a persistence-backed list screen and server editor flow for add/edit/delete operations.
+- Server editor applies required validation for host/share/base path/username/password before save.
+- Secret persistence is routed through `CredentialStore`, with an Android Keystore-backed implementation via encrypted preferences.
+- Room remains alias-only for credentials (`credentialAlias`) and never stores raw password values.
+
 ---
 
 ## Key implementation risks and mitigations

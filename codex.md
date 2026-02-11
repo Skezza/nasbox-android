@@ -8,6 +8,10 @@ This document defines required behavior for future Codex implementation passes.
 - Respect MVP constraints: manual-run only, archive-only, SMB2/3.
 - Keep all work aligned with `technical_considerations.md` and `project_plan.md`.
 
+### Current phase handoff marker
+- Phase 2 is complete (credential security + Vault management).
+- The next approved implementation target is Phase 3 (SMB connectivity and test flow).
+
 ## 2) No-copy implementation expectation
 - Use planning documents as guidance, not as direct code templates.
 - Do not paste large generated implementation blocks from specs into source.

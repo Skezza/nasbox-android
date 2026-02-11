@@ -6,7 +6,8 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ## Current execution status
 - ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
 - ✅ Phase 1 — Persistence foundation: **Completed**.
-- ⏳ Phase 2 — Credential security and Vault management: **Next**.
+- ✅ Phase 2 — Credential security and Vault management: **Completed**.
+- ⏳ Phase 3 — SMB connectivity and test flow: **Next**.
 
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
@@ -75,6 +76,12 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - Server create/edit/delete works end-to-end.
 - Password is not stored in plaintext DB.
 - Vault screen reflects updated server states.
+
+### Implementation status
+- ✅ Completed: Vault screen now renders persistence-backed server list with add/edit/delete actions.
+- ✅ Completed: Server editor enforces required input validation for host/share/base path/username/password fields.
+- ✅ Completed: Credential storage is abstracted behind `CredentialStore` and implemented with Android Keystore-backed encrypted preferences.
+- ✅ Completed: Room continues to store only `credentialAlias` references; password material is read/written through secure storage only.
 
 ---
 

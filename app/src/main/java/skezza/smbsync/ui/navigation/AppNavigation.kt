@@ -2,13 +2,9 @@ package skezza.smbsync.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -16,25 +12,36 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import skezza.smbsync.di.AppContainer
 import skezza.smbsync.ui.screens.EditorPlaceholderScreen
 import skezza.smbsync.ui.screens.RootPlaceholderScreen
+import skezza.smbsync.ui.vault.ServerEditorScreen
+import skezza.smbsync.ui.vault.ServerEditorViewModel
+import skezza.smbsync.ui.vault.VaultScreen
+import skezza.smbsync.ui.vault.VaultViewModel
 
 private const val ROUTE_DASHBOARD = "dashboard"
 private const val ROUTE_PLANS = "plans"
 private const val ROUTE_VAULT = "vault"
-private const val ROUTE_PLAN_EDITOR = "planEditor"
 private const val ROUTE_SERVER_EDITOR = "serverEditor"
 private const val ROUTE_RUN_DETAIL = "runDetail"
+
+private const val SERVER_ID_ARG = "serverId"
+private const val ROUTE_SERVER_EDITOR_PATTERN = "$ROUTE_SERVER_EDITOR?$SERVER_ID_ARG={$SERVER_ID_ARG}"
 
 private enum class TopLevelDestination(
     val route: String,
@@ -48,6 +55,7 @@ private enum class TopLevelDestination(
 
 @Composable
 fun SMBSyncApp(navController: NavHostController = rememberNavController()) {
+    val appContainer = remember { AppContainer(navController.context.applicationContext) }
     val navBackStackEntry = navController.currentBackStackEntryAsState().value
     val currentDestination = navBackStackEntry?.destination
 
@@ -86,48 +94,56 @@ fun SMBSyncApp(navController: NavHostController = rememberNavController()) {
                     title = "Dashboard",
                     description = "Mission control placeholder. Run summaries and health indicators will be added in later phases.",
                     primaryActionLabel = "Run detail",
-                    primaryActionIcon = Icons.Default.PlayArrow,
+                    primaryActionIcon = Icons.Default.Dashboard,
                     onPrimaryAction = { navController.navigate(ROUTE_RUN_DETAIL) },
                     secondaryActionLabel = "Open Plans",
-                    secondaryActionIcon = Icons.Default.Edit,
+                    secondaryActionIcon = Icons.Default.Folder,
                     onSecondaryAction = { navController.navigate(ROUTE_PLANS) },
                 )
             }
             composable(ROUTE_PLANS) {
-                RootPlaceholderScreen(
+                EditorPlaceholderScreen(
                     title = "Plans",
-                    description = "Plan list placeholder. CRUD and media/server binding will be implemented in later phases.",
-                    primaryActionLabel = "New plan",
-                    primaryActionIcon = Icons.Default.Add,
-                    onPrimaryAction = { navController.navigate(ROUTE_PLAN_EDITOR) },
-                    secondaryActionLabel = "Open Vault",
-                    secondaryActionIcon = Icons.Default.Storage,
-                    onSecondaryAction = { navController.navigate(ROUTE_VAULT) },
+                    description = "Plan management remains in a placeholder state until Phase 4.",
+                    onNavigateBack = { navController.navigate(ROUTE_DASHBOARD) },
                 )
             }
             composable(ROUTE_VAULT) {
-                RootPlaceholderScreen(
-                    title = "Vault",
-                    description = "Server list placeholder. Secure credential handling and connection checks will be implemented in later phases.",
-                    primaryActionLabel = "Add server",
-                    primaryActionIcon = Icons.Default.Add,
-                    onPrimaryAction = { navController.navigate(ROUTE_SERVER_EDITOR) },
-                    secondaryActionLabel = "Back to Dashboard",
-                    secondaryActionIcon = Icons.Default.Dashboard,
-                    onSecondaryAction = { navController.navigate(ROUTE_DASHBOARD) },
+                val viewModel: VaultViewModel = viewModel(
+                    factory = VaultViewModel.factory(
+                        serverRepository = appContainer.serverRepository,
+                        credentialStore = appContainer.credentialStore,
+                    ),
+                )
+                VaultScreen(
+                    viewModel = viewModel,
+                    onAddServer = { navController.navigate(ROUTE_SERVER_EDITOR) },
+                    onEditServer = { serverId ->
+                        navController.navigate("$ROUTE_SERVER_EDITOR?$SERVER_ID_ARG=$serverId")
+                    },
                 )
             }
-            composable(ROUTE_PLAN_EDITOR) {
-                EditorPlaceholderScreen(
-                    title = "Plan Editor",
-                    description = "Plan editor route is wired and ready for persistence-backed fields in Phase 1+.",
-                    onNavigateBack = { navController.popBackStack() },
+            composable(
+                route = ROUTE_SERVER_EDITOR_PATTERN,
+                arguments = listOf(
+                    navArgument(SERVER_ID_ARG) {
+                        nullable = true
+                        defaultValue = null
+                        type = NavType.LongType
+                    },
+                ),
+            ) { backStackEntry ->
+                val serverId = backStackEntry.arguments?.getLong(SERVER_ID_ARG)
+                val viewModel: ServerEditorViewModel = viewModel(
+                    key = "server-editor-$serverId",
+                    factory = ServerEditorViewModel.factory(
+                        serverId = serverId,
+                        serverRepository = appContainer.serverRepository,
+                        credentialStore = appContainer.credentialStore,
+                    ),
                 )
-            }
-            composable(ROUTE_SERVER_EDITOR) {
-                EditorPlaceholderScreen(
-                    title = "Server Editor",
-                    description = "Server editor route is wired and ready for secure credential integration in Phase 2.",
+                ServerEditorScreen(
+                    viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
