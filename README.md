@@ -1,1 +1,47 @@
-# SMBSync
+# SMBSync (VaultPilot MVP)
+
+SMBSync is an Android app focused on **manual, archive-only photo backup** from local albums to SMB shares (SMB2/3).
+
+## MVP scope
+
+- Manual run only (no background scheduler in MVP)
+- Archive-only behavior (never delete remote or local files)
+- SMB2/3 remote target
+- Backup proof tracking to prevent duplicate uploads on re-run
+
+## Current status
+
+- ✅ Phase 0 complete: navigation and placeholder shells are wired.
+- ✅ Phase 1 complete: persistence foundation (Room entities, DAOs, repository abstractions) is implemented.
+- ⏳ Next: Phase 2 credential security and Vault management.
+
+See:
+- `project_plan.md` for phase-by-phase roadmap
+- `technical_considerations.md` for architecture and behavioral rules
+- `codex.md` for implementation guardrails
+
+## Project structure (current)
+
+- `app/src/main/java/skezza/smbsync/ui/**` — Compose navigation and placeholder screens
+- `app/src/main/java/skezza/smbsync/data/db/**` — Room entities, DAOs, database class, provider
+- `app/src/main/java/skezza/smbsync/data/repository/**` — repository interfaces and Room-backed implementations
+- `app/src/test/java/**` — baseline persistence tests
+
+## Running checks
+
+From repository root:
+
+```bash
+./gradlew test
+```
+
+## Testing direction (MVP)
+
+This project currently includes baseline persistence tests for Phase 1. As later phases land, keep expanding **basic unit/DAO tests** for:
+
+- skip vs upload decision logic
+- template rendering and filename sanitization
+- error mapping to user-facing categories
+- key DAO constraints and query behavior
+
+Automated UI testing is intentionally out of scope for this MVP stage.
