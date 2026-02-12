@@ -41,6 +41,7 @@ class TestSmbConnectionUseCaseTest {
         assertTrue(result.success)
         val updated = repo.server
         assertEquals("SUCCESS", updated?.lastTestStatus)
+        assertTrue(result.message.contains("host/share"))
         assertEquals(42L, updated?.lastTestLatencyMs)
         assertEquals(123L, updated?.lastTestTimestampEpochMs)
     }
@@ -51,8 +52,8 @@ class TestSmbConnectionUseCaseTest {
             ServerEntity(
                 serverId = 7,
                 name = "NAS",
-                host = "host",
-                shareName = "share",
+                host = "smb://host/share",
+                shareName = "",
                 basePath = "base",
                 username = "user",
                 credentialAlias = "alias",

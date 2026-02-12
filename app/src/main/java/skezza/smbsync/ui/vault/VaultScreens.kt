@@ -105,6 +105,9 @@ fun VaultScreen(
                             Text(server.endpoint)
                             Text("Base: ${server.basePath}")
                             Text(server.connectionStatusLabel())
+                            if (server.lastTestStatus == "FAILED" && !server.lastTestErrorMessage.isNullOrBlank()) {
+                                Text("Last error: ${server.lastTestErrorMessage}")
+                            }
                             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                 Row {
                                     IconButton(onClick = { onEditServer(server.serverId) }) {
@@ -179,10 +182,20 @@ fun ServerEditorScreen(
             ServerField("Name", state.name, state.validation.nameError) {
                 viewModel.updateEditorField(ServerEditorField.NAME, it)
             }
-            ServerField("Host", state.host, state.validation.hostError) {
+            ServerField(
+                label = "Host",
+                value = state.host,
+                error = state.validation.hostError,
+                helperText = "Examples: quanta.local or smb://quanta.local/photos",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
-            ServerField("Share", state.shareName, state.validation.shareNameError) {
+            ServerField(
+                label = "Share",
+                value = state.shareName,
+                error = state.validation.shareNameError,
+                helperText = "Can be left blank if host is smb://host/share",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
             ServerField("Base path", state.basePath, state.validation.basePathError) {
@@ -215,6 +228,7 @@ private fun ServerField(
     label: String,
     value: String,
     error: String?,
+    helperText: String? = null,
     onChange: (String) -> Unit,
 ) {
     OutlinedTextField(
@@ -224,8 +238,9 @@ private fun ServerField(
         isError = error != null,
         modifier = Modifier.fillMaxWidth(),
         supportingText = {
-            if (error != null) {
-                Text(error)
+            when {
+                error != null -> Text(error)
+                !helperText.isNullOrBlank() -> Text(helperText)
             }
         },
     )

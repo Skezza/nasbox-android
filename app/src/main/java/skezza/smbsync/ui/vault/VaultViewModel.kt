@@ -40,6 +40,7 @@ class VaultViewModel(
                     lastTestStatus = it.lastTestStatus,
                     lastTestTimestampEpochMs = it.lastTestTimestampEpochMs,
                     lastTestLatencyMs = it.lastTestLatencyMs,
+                    lastTestErrorMessage = it.lastTestErrorMessage,
                     isTesting = testing.contains(it.serverId),
                 )
             }
@@ -145,7 +146,7 @@ class VaultViewModel(
             testingServerIds.value = testingServerIds.value + serverId
             runCatching {
                 val result = testSmbConnectionUseCase.testPersistedServer(serverId)
-                _message.value = listOfNotNull(result.message, result.recoveryHint).joinToString(" ")
+                _message.value = listOfNotNull(result.message, result.recoveryHint, result.technicalDetail).joinToString(" ")
             }.onFailure {
                 _message.value = "Connection test failed due to an unexpected error."
             }
@@ -180,7 +181,7 @@ class VaultViewModel(
                     username = current.username,
                     password = current.password,
                 )
-                _message.value = listOfNotNull(result.message, result.recoveryHint).joinToString(" ")
+                _message.value = listOfNotNull(result.message, result.recoveryHint, result.technicalDetail).joinToString(" ")
             }.onFailure {
                 _message.value = "Connection test failed due to an unexpected error."
             }
@@ -244,6 +245,7 @@ data class ServerListItemUiState(
     val lastTestStatus: String? = null,
     val lastTestTimestampEpochMs: Long? = null,
     val lastTestLatencyMs: Long? = null,
+    val lastTestErrorMessage: String? = null,
     val isTesting: Boolean = false,
 )
 

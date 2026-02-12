@@ -15,6 +15,7 @@ SMBSync is an Android app focused on **manual, archive-only photo backup** from 
 - ✅ Phase 1 complete: persistence foundation (Room entities, DAOs, repository abstractions) is implemented.
 - ✅ Phase 2 complete: credential security and Vault management are implemented.
 - ✅ Phase 3 complete: SMB connection testing, error mapping, and Vault test actions are implemented.
+- ℹ️ Vault host input accepts either raw host (`quanta.local`) or SMB URI form (`smb://quanta.local/share`) for connection testing.
 - ⏳ Next: Phase 4 media source integration and plan management.
 
 See:

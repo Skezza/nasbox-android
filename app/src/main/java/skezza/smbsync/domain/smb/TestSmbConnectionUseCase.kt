@@ -62,18 +62,32 @@ class TestSmbConnectionUseCase(
         username: String,
         password: String,
     ): SmbConnectionUiResult {
+        val parsedTarget = SmbTargetParser.parse(host, shareName)
+        if (parsedTarget is ParsedSmbTargetResult.Error) {
+            return SmbConnectionUiResult.failure(
+                category = SmbErrorCategory.UNKNOWN,
+                message = parsedTarget.message,
+                recoveryHint = "Use host like quanta.local (or smb://quanta.local/share) and verify share.",
+            )
+        }
+
+        val target = (parsedTarget as ParsedSmbTargetResult.Success).target
+
         return runCatching {
             smbClient.testConnection(
                 SmbConnectionRequest(
-                    host = host.trim(),
-                    shareName = shareName.trim(),
+                    host = target.host,
+                    shareName = target.shareName,
                     username = username.trim(),
                     password = password,
                 ),
             )
         }.fold(
             onSuccess = {
-                SmbConnectionUiResult.success(latencyMs = it.latencyMs)
+                SmbConnectionUiResult.success(
+                    latencyMs = it.latencyMs,
+                    endpoint = "${target.host}/${target.shareName}",
+                )
             },
             onFailure = { throwable ->
                 val mapped = throwable.toSmbConnectionFailure().toUiError()
@@ -107,10 +121,10 @@ data class SmbConnectionUiResult(
     val latencyMs: Long? = null,
 ) {
     companion object {
-        fun success(latencyMs: Long): SmbConnectionUiResult = SmbConnectionUiResult(
+        fun success(latencyMs: Long, endpoint: String): SmbConnectionUiResult = SmbConnectionUiResult(
             success = true,
             category = SmbErrorCategory.NONE,
-            message = "Connection succeeded (${latencyMs}ms).",
+            message = "Connection succeeded to $endpoint (${latencyMs}ms).",
             latencyMs = latencyMs,
         )
 
