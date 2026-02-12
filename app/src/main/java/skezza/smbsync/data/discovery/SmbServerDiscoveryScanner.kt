@@ -64,7 +64,7 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
         val local = localIPv4Address() ?: return emptyList()
         val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
         val ifaceAddress = interfaces
-            .flatMap { Collections.list(it.interfaceAddresses) }
+            .flatMap { networkInterface -> networkInterface.interfaceAddresses.orEmpty() }
             .firstOrNull { it.address == local }
 
         val prefixLength = ifaceAddress?.networkPrefixLength?.toInt() ?: 24
