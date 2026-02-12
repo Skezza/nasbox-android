@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedButton
@@ -26,13 +28,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,7 +51,9 @@ fun VaultScreen(
 ) {
     val servers by viewModel.servers.collectAsState()
     val message by viewModel.message.collectAsState()
+    val discoveryState by viewModel.discoveryState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var showDiscoveryDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
@@ -59,6 +67,12 @@ fun VaultScreen(
             TopAppBar(
                 title = { Text("Vault") },
                 actions = {
+                    IconButton(onClick = {
+                        showDiscoveryDialog = true
+                        viewModel.discoverServers()
+                    }) {
+                        Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
+                    }
                     IconButton(onClick = onAddServer) {
                         Icon(Icons.Default.Add, contentDescription = "Add server")
                     }
@@ -67,6 +81,23 @@ fun VaultScreen(
         },
         modifier = modifier,
     ) { innerPadding ->
+        if (showDiscoveryDialog) {
+            DiscoveryDialog(
+                state = discoveryState,
+                onDismiss = {
+                    showDiscoveryDialog = false
+                    viewModel.clearDiscoveryState()
+                },
+                onRefresh = viewModel::discoverServers,
+                onUseServer = { discovered ->
+                    viewModel.setDiscoverySelection(discovered)
+                    showDiscoveryDialog = false
+                    viewModel.clearDiscoveryState()
+                    onAddServer()
+                },
+            )
+        }
+
         if (servers.isEmpty()) {
             Column(
                 modifier = Modifier
@@ -204,7 +235,12 @@ fun ServerEditorScreen(
             ServerField("Username", state.username, state.validation.usernameError) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
-            ServerField("Password", state.password, state.validation.passwordError) {
+            ServerField(
+                label = "Password",
+                value = state.password,
+                error = state.validation.passwordError,
+                isPassword = true,
+            ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
@@ -229,6 +265,7 @@ private fun ServerField(
     value: String,
     error: String?,
     helperText: String? = null,
+    isPassword: Boolean = false,
     onChange: (String) -> Unit,
 ) {
     OutlinedTextField(
@@ -236,11 +273,66 @@ private fun ServerField(
         onValueChange = onChange,
         label = { Text(label) },
         isError = error != null,
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         modifier = Modifier.fillMaxWidth(),
         supportingText = {
             when {
                 error != null -> Text(error)
                 !helperText.isNullOrBlank() -> Text(helperText)
+            }
+        },
+    )
+}
+
+@Composable
+private fun DiscoveryDialog(
+    state: DiscoveryUiState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onUseServer: (skezza.smbsync.data.discovery.DiscoveredSmbServer) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Discover SMB Servers") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Scanning local Wi-Fi subnet for devices with SMB port 445 open.")
+                if (state.isScanning) {
+                    Text("Scanning...")
+                }
+                if (state.errorMessage != null) {
+                    Text(state.errorMessage)
+                }
+                if (!state.isScanning && state.servers.isEmpty() && state.errorMessage == null) {
+                    Text("No SMB servers discovered.")
+                }
+                state.servers.forEach { server ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onUseServer(server) }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column {
+                            Text(server.host)
+                            Text(server.ipAddress)
+                        }
+                        TextButton(onClick = { onUseServer(server) }) {
+                            Text("Use")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRefresh, enabled = !state.isScanning) {
+                Text(if (state.isScanning) "Scanning" else "Scan again")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
             }
         },
     )

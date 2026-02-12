@@ -61,6 +61,7 @@ fun SMBSyncApp(
             serverRepository = appContainer.serverRepository,
             credentialStore = appContainer.credentialStore,
             testSmbConnectionUseCase = appContainer.testSmbConnectionUseCase,
+            discoverSmbServersUseCase = appContainer.discoverSmbServersUseCase,
         ),
     )
 

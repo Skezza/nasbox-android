@@ -32,6 +32,8 @@ See:
 
 ## SMB connection prerequisites
 
+Vault also provides a **Discover servers** action that scans the current Wi-Fi subnet for reachable SMB hosts and can prefill server setup.
+
 - App manifest must include `android.permission.INTERNET` for SMB socket connectivity.
 - `android.permission.ACCESS_NETWORK_STATE` is included so network availability diagnostics can be surfaced in UX improvements.
 - For mDNS hosts like `quanta.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
