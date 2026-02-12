@@ -10,10 +10,11 @@ import skezza.smbsync.ui.theme.SMBSyncTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val appContainer = AppContainer(applicationContext)
         enableEdgeToEdge()
         setContent {
             SMBSyncTheme {
-                SMBSyncApp()
+                SMBSyncApp(appContainer = appContainer)
             }
         }
     }
