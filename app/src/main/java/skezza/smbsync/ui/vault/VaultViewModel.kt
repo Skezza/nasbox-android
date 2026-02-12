@@ -3,6 +3,7 @@ package skezza.smbsync.ui.vault
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,25 +41,39 @@ class VaultViewModel(
     private val _editorState = MutableStateFlow(ServerEditorUiState())
     val editorState: StateFlow<ServerEditorUiState> = _editorState.asStateFlow()
 
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
+    fun clearMessage() {
+        _message.value = null
+    }
+
     fun loadServerForEdit(serverId: Long?) {
         if (serverId == null) {
             _editorState.value = ServerEditorUiState()
+            clearMessage()
             return
         }
 
         viewModelScope.launch {
-            val server = serverRepository.getServer(serverId) ?: return@launch
-            val existingPassword = credentialStore.loadPassword(server.credentialAlias).orEmpty()
-            _editorState.value = ServerEditorUiState(
-                editingServerId = server.serverId,
-                name = server.name,
-                host = server.host,
-                shareName = server.shareName,
-                basePath = server.basePath,
-                username = server.username,
-                password = existingPassword,
-                validation = ServerValidationResult(),
-            )
+            runCatching {
+                val server = serverRepository.getServer(serverId)
+                    ?: throw IllegalStateException("Server not found.")
+                val existingPassword = credentialStore.loadPassword(server.credentialAlias).orEmpty()
+                _editorState.value = ServerEditorUiState(
+                    editingServerId = server.serverId,
+                    name = server.name,
+                    host = server.host,
+                    shareName = server.shareName,
+                    basePath = server.basePath,
+                    username = server.username,
+                    password = existingPassword,
+                    validation = ServerValidationResult(),
+                )
+                clearMessage()
+            }.onFailure {
+                _message.value = "Unable to load server details. Please try again."
+            }
         }
     }
 
@@ -83,39 +98,49 @@ class VaultViewModel(
                 return@launch
             }
 
-            val credentialAlias = if (state.editingServerId != null) {
-                serverRepository.getServer(state.editingServerId)?.credentialAlias ?: newAlias()
-            } else {
-                newAlias()
+            runCatching {
+                val credentialAlias = if (state.editingServerId != null) {
+                    serverRepository.getServer(state.editingServerId)?.credentialAlias ?: newAlias()
+                } else {
+                    newAlias()
+                }
+
+                credentialStore.savePassword(credentialAlias, state.password)
+
+                val entity = ServerEntity(
+                    serverId = state.editingServerId ?: 0,
+                    name = state.name.trim(),
+                    host = state.host.trim(),
+                    shareName = state.shareName.trim(),
+                    basePath = state.basePath.trim(),
+                    username = state.username.trim(),
+                    credentialAlias = credentialAlias,
+                )
+
+                if (state.editingServerId == null) {
+                    serverRepository.createServer(entity)
+                } else {
+                    serverRepository.updateServer(entity)
+                }
+            }.onSuccess {
+                _editorState.value = ServerEditorUiState()
+                clearMessage()
+                onSuccess()
+            }.onFailure {
+                _message.value = "Unable to save server. Ensure the name is unique and try again."
             }
-
-            credentialStore.savePassword(credentialAlias, state.password)
-
-            val entity = ServerEntity(
-                serverId = state.editingServerId ?: 0,
-                name = state.name.trim(),
-                host = state.host.trim(),
-                shareName = state.shareName.trim(),
-                basePath = state.basePath.trim(),
-                username = state.username.trim(),
-                credentialAlias = credentialAlias,
-            )
-
-            if (state.editingServerId == null) {
-                serverRepository.createServer(entity)
-            } else {
-                serverRepository.updateServer(entity)
-            }
-            _editorState.value = ServerEditorUiState()
-            onSuccess()
         }
     }
 
     fun deleteServer(serverId: Long) {
         viewModelScope.launch {
-            val existing = serverRepository.getServer(serverId) ?: return@launch
-            credentialStore.deletePassword(existing.credentialAlias)
-            serverRepository.deleteServer(serverId)
+            runCatching {
+                val existing = serverRepository.getServer(serverId) ?: return@launch
+                credentialStore.deletePassword(existing.credentialAlias)
+                serverRepository.deleteServer(serverId)
+            }.onFailure {
+                _message.value = "Unable to delete server. Please try again."
+            }
         }
     }
 
@@ -132,6 +157,10 @@ class VaultViewModel(
                     return VaultViewModel(serverRepository, credentialStore) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+            }
+
+            override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
+                return create(modelClass)
             }
         }
     }

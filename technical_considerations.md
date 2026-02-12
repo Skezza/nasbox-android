@@ -212,6 +212,7 @@ Each mapped error should provide:
 - Server editor enforces required-field validation for server name, host, share, base path, username, and password.
 - Secret values are encrypted via Android Keystore-backed AES/GCM keys and stored outside Room.
 - Room persists only `credentialAlias` references, preserving the plaintext password prohibition.
+- VaultViewModel factory now supports both classic and `CreationExtras` creation paths, and Vault flows are guarded with user-visible error handling to avoid coroutine crash propagation during editor operations.
 
 ---
 
