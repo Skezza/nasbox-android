@@ -30,6 +30,12 @@ See:
 - `app/src/main/java/skezza/smbsync/data/repository/**` — repository interfaces and Room-backed implementations
 - `app/src/test/java/**` — baseline persistence tests
 
+## SMB connection prerequisites
+
+- App manifest must include `android.permission.INTERNET` for SMB socket connectivity.
+- `android.permission.ACCESS_NETWORK_STATE` is included so network availability diagnostics can be surfaced in UX improvements.
+- For mDNS hosts like `quanta.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
+
 ## Running checks
 
 From repository root:
