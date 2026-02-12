@@ -19,7 +19,7 @@ class AppContainer(context: Context) {
     val serverRepository: ServerRepository = DefaultServerRepository(database.serverDao())
     val credentialStore: CredentialStore = AndroidKeystoreCredentialStore(context)
     private val smbClient: SmbClient = SmbjClient()
-    private val smbServerDiscoveryScanner: SmbServerDiscoveryScanner = AndroidSmbServerDiscoveryScanner(context)
+    private val smbServerDiscoveryScanner: SmbServerDiscoveryScanner = AndroidSmbServerDiscoveryScanner()
 
     val testSmbConnectionUseCase: TestSmbConnectionUseCase = TestSmbConnectionUseCase(
         serverRepository = serverRepository,

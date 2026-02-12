@@ -219,7 +219,7 @@ class VaultViewModel(
                     errorMessage = null,
                 )
                 if (servers.isEmpty()) {
-                    _message.value = "No SMB servers found on this Wi-Fi network."
+                    _message.value = "No SMB servers discovered from subnet scan. If your host resolves by mDNS, try entering smb://samba.local/<share> manually."
                 }
             }.onFailure {
                 _discoveryState.value = _discoveryState.value.copy(
