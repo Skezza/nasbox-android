@@ -24,6 +24,9 @@ data class ServerEntity(
     val credentialAlias: String,
     val lastTestStatus: String? = null,
     val lastTestTimestampEpochMs: Long? = null,
+    val lastTestLatencyMs: Long? = null,
+    val lastTestErrorCategory: String? = null,
+    val lastTestErrorMessage: String? = null,
 )
 
 @Entity(

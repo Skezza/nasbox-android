@@ -6,10 +6,19 @@ import skezza.smbsync.data.repository.DefaultServerRepository
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.AndroidKeystoreCredentialStore
 import skezza.smbsync.data.security.CredentialStore
+import skezza.smbsync.data.smb.SmbClient
+import skezza.smbsync.data.smb.SmbjClient
+import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 
 class AppContainer(context: Context) {
     private val database = DatabaseProvider.get(context)
 
     val serverRepository: ServerRepository = DefaultServerRepository(database.serverDao())
     val credentialStore: CredentialStore = AndroidKeystoreCredentialStore(context)
+    private val smbClient: SmbClient = SmbjClient()
+    val testSmbConnectionUseCase: TestSmbConnectionUseCase = TestSmbConnectionUseCase(
+        serverRepository = serverRepository,
+        credentialStore = credentialStore,
+        smbClient = smbClient,
+    )
 }

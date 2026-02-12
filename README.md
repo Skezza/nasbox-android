@@ -13,7 +13,9 @@ SMBSync is an Android app focused on **manual, archive-only photo backup** from 
 
 - ✅ Phase 0 complete: navigation and placeholder shells are wired.
 - ✅ Phase 1 complete: persistence foundation (Room entities, DAOs, repository abstractions) is implemented.
-- ⏳ Next: Phase 2 credential security and Vault management.
+- ✅ Phase 2 complete: credential security and Vault management are implemented.
+- ✅ Phase 3 complete: SMB connection testing, error mapping, and Vault test actions are implemented.
+- ⏳ Next: Phase 4 media source integration and plan management.
 
 See:
 - `project_plan.md` for phase-by-phase roadmap

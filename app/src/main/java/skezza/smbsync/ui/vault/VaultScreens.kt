@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedButton
@@ -94,23 +95,34 @@ fun VaultScreen(
                             .fillMaxWidth()
                             .clickable { onEditServer(server.serverId) },
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(server.name)
-                                Text(server.endpoint)
-                                Text("Base: ${server.basePath}")
-                            }
-                            Row {
-                                IconButton(onClick = { onEditServer(server.serverId) }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit server")
+                            Text(server.name)
+                            Text(server.endpoint)
+                            Text("Base: ${server.basePath}")
+                            Text(server.connectionStatusLabel())
+                            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                Row {
+                                    IconButton(onClick = { onEditServer(server.serverId) }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit server")
+                                    }
+                                    IconButton(onClick = { viewModel.deleteServer(server.serverId) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete server")
+                                    }
                                 }
-                                IconButton(onClick = { viewModel.deleteServer(server.serverId) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete server")
+                                ElevatedButton(
+                                    onClick = { viewModel.testServerConnection(server.serverId) },
+                                    enabled = !server.isTesting,
+                                ) {
+                                    Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                                    Text(
+                                        if (server.isTesting) "Testing..." else "Test",
+                                        modifier = Modifier.padding(start = 8.dp),
+                                    )
                                 }
                             }
                         }
@@ -183,8 +195,16 @@ fun ServerEditorScreen(
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
-            Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
-                Text(if (serverId == null) "Create server" else "Save changes")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
+                    Text(if (serverId == null) "Create server" else "Save changes")
+                }
+                ElevatedButton(
+                    onClick = viewModel::testEditorConnection,
+                    enabled = !state.isTestingConnection,
+                ) {
+                    Text(if (state.isTestingConnection) "Testing..." else "Test connection")
+                }
             }
         }
     }
@@ -209,4 +229,12 @@ private fun ServerField(
             }
         },
     )
+}
+
+private fun ServerListItemUiState.connectionStatusLabel(): String {
+    return when (lastTestStatus) {
+        "SUCCESS" -> "Connection: Passed${lastTestLatencyMs?.let { " (${it}ms)" } ?: ""}"
+        "FAILED" -> "Connection: Failed"
+        else -> "Connection: Not tested"
+    }
 }

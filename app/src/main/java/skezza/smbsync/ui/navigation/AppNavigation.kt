@@ -60,6 +60,7 @@ fun SMBSyncApp(
         factory = VaultViewModel.factory(
             serverRepository = appContainer.serverRepository,
             credentialStore = appContainer.credentialStore,
+            testSmbConnectionUseCase = appContainer.testSmbConnectionUseCase,
         ),
     )
 

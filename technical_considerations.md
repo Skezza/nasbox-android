@@ -221,3 +221,11 @@ Each mapped error should provide:
 - Credential complexity: isolate security concerns in a dedicated store abstraction.
 - OEM MediaStore differences: treat metadata as partially unreliable.
 - Long run interruption: persist logs and counters incrementally.
+
+
+## Phase 3 implementation notes
+- SMB connectivity now runs through a dedicated `SmbClient` abstraction with an SMBJ-backed implementation for SMB2/3 handshake/auth/share access checks.
+- Connection tests are orchestrated by a domain use case that supports both persisted Vault servers and in-editor draft credentials.
+- SMB failures are normalized into MVP error taxonomy categories and surfaced as concise user-facing messages with recovery hints.
+- Server persistence now records test telemetry (`status`, `timestamp`, `latency`, and mapped error category/message) for vault health and upcoming dashboard status aggregation.
+- Room schema was incremented to version 2 with an explicit migration adding test metadata columns to `servers` to preserve upgrade compatibility.
