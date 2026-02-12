@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -33,6 +32,7 @@ import skezza.smbsync.ui.vault.ServerEditorScreen
 import skezza.smbsync.ui.vault.ServerEditorViewModel
 import skezza.smbsync.ui.vault.VaultScreen
 import skezza.smbsync.ui.vault.VaultViewModel
+import androidx.compose.material.icons.filled.Lock
 
 private const val ROUTE_DASHBOARD = "dashboard"
 private const val ROUTE_PLANS = "plans"
@@ -127,13 +127,14 @@ fun SMBSyncApp(navController: NavHostController = rememberNavController()) {
                 route = ROUTE_SERVER_EDITOR_PATTERN,
                 arguments = listOf(
                     navArgument(SERVER_ID_ARG) {
+                        type = NavType.StringType
                         nullable = true
                         defaultValue = null
-                        type = NavType.LongType
                     },
                 ),
             ) { backStackEntry ->
-                val serverId = backStackEntry.arguments?.getLong(SERVER_ID_ARG)
+                val serverIdStr = backStackEntry.arguments?.getString(SERVER_ID_ARG)
+                val serverId = serverIdStr?.toLongOrNull()
                 val viewModel: ServerEditorViewModel = viewModel(
                     key = "server-editor-$serverId",
                     factory = ServerEditorViewModel.factory(
