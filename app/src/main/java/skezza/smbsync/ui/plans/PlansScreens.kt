@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -208,44 +209,64 @@ fun PlanEditorScreen(
                 onSelect = viewModel::updateEditorSourceType,
             )
 
-            if (editorState.sourceType == PlanSourceType.ALBUM) {
-                if (!hasMediaPermission) {
-                    Text("Photo permission is required to list albums.")
-                    Button(onClick = { permissionLauncher.launch(permission) }) { Text("Grant media access") }
-                } else {
-                    if (isLoadingAlbums) Text("Loading albums...")
-                    if (albums.isEmpty()) Text("No albums found. Capture or import photos to create plans.")
-                    AlbumSelector(
-                        options = albums,
-                        selectedAlbumId = editorState.selectedAlbumId,
-                        error = editorState.validation.albumError,
-                        onSelect = viewModel::updateEditorAlbum,
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Include videos")
-                        Switch(checked = editorState.includeVideos, onCheckedChange = viewModel::updateEditorIncludeVideos)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Use album templating")
-                        Switch(checked = editorState.useAlbumTemplating, onCheckedChange = viewModel::updateEditorUseAlbumTemplating)
+            when (editorState.sourceType) {
+                PlanSourceType.ALBUM -> {
+                    if (!hasMediaPermission) {
+                        Text("Photo permission is required to list albums.")
+                        Button(onClick = { permissionLauncher.launch(permission) }) { Text("Grant media access") }
+                    } else {
+                        if (isLoadingAlbums) Text("Loading albums...")
+                        if (albums.isEmpty()) Text("No albums found. Capture or import photos to create plans.")
+                        AlbumSelector(
+                            options = albums,
+                            selectedAlbumId = editorState.selectedAlbumId,
+                            error = editorState.validation.albumError,
+                            onSelect = viewModel::updateEditorAlbum,
+                        )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Include videos")
+                            Switch(checked = editorState.includeVideos, onCheckedChange = viewModel::updateEditorIncludeVideos)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Use album templating")
+                            Switch(checked = editorState.useAlbumTemplating, onCheckedChange = viewModel::updateEditorUseAlbumTemplating)
+                        }
                     }
                 }
-            } else {
-                OutlinedTextField(
-                    value = editorState.folderPath,
-                    onValueChange = viewModel::updateEditorFolderPath,
-                    label = { Text("Folder URI/path") },
-                    supportingText = { editorState.validation.folderPathError?.let { Text(it) } },
-                    isError = editorState.validation.folderPathError != null,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { folderLauncher.launch(null) }) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null)
-                        Text("Choose folder", modifier = Modifier.padding(start = 6.dp))
+
+                PlanSourceType.FOLDER -> {
+                    OutlinedTextField(
+                        value = editorState.folderPath,
+                        onValueChange = viewModel::updateEditorFolderPath,
+                        label = { Text("Folder URI/path") },
+                        supportingText = { editorState.validation.folderPathError?.let { Text(it) } },
+                        isError = editorState.validation.folderPathError != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { folderLauncher.launch(null) }) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null)
+                            Text("Choose folder", modifier = Modifier.padding(start = 6.dp))
+                        }
+                        ElevatedButton(onClick = { viewModel.updateEditorFolderPath("/storage/emulated/0/DCIM") }) {
+                            Text("Use DCIM")
+                        }
                     }
-                    ElevatedButton(onClick = { viewModel.updateEditorFolderPath("/storage/emulated/0/DCIM") }) {
-                        Text("Use DCIM")
+                }
+
+                PlanSourceType.FULL_DEVICE -> {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.Info, contentDescription = null)
+                                Text("Full phone backup")
+                            }
+                            Text("This plan will attempt to back up copyable shared-storage folders (for example DCIM, Pictures, Movies, Download, Documents, Music).")
+                            Text("Heads up: this can take a long time and use plenty of battery. Best run overnight while charging.")
+                        }
                     }
                 }
             }
@@ -312,6 +333,11 @@ private fun SourceTypeSelector(
             selected = selectedType == PlanSourceType.FOLDER,
             onClick = { onSelect(PlanSourceType.FOLDER) },
             label = { Text("General Folder Plan") },
+        )
+        FilterChip(
+            selected = selectedType == PlanSourceType.FULL_DEVICE,
+            onClick = { onSelect(PlanSourceType.FULL_DEVICE) },
+            label = { Text("Full Phone Backup") },
         )
     }
 }

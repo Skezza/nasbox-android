@@ -52,10 +52,10 @@ class PlansViewModel(
         plans.map { plan ->
             val serverName = servers.firstOrNull { it.serverId == plan.serverId }?.name ?: "Unknown server"
             val sourceType = parseSourceType(plan.sourceType)
-            val sourceSummary = if (sourceType == PlanSourceType.ALBUM) {
-                "Album (${plan.sourceAlbum})${if (plan.includeVideos) " + videos" else ""}"
-            } else {
-                "Folder (${plan.folderPath.ifBlank { "not set" }})"
+            val sourceSummary = when (sourceType) {
+                PlanSourceType.ALBUM -> "Album (${plan.sourceAlbum})${if (plan.includeVideos) " + videos" else ""}"
+                PlanSourceType.FOLDER -> "Folder (${plan.folderPath.ifBlank { "not set" }})"
+                PlanSourceType.FULL_DEVICE -> "Full device backup (copyable storage)"
             }
             PlanListItemUiState(
                 planId = plan.planId,
@@ -166,17 +166,23 @@ class PlansViewModel(
                 return@launch
             }
 
+            val isAlbum = state.sourceType == PlanSourceType.ALBUM
+            val isFolder = state.sourceType == PlanSourceType.FOLDER
             val entity = PlanEntity(
                 planId = state.editingPlanId ?: 0,
                 name = state.name.trim(),
-                sourceAlbum = if (state.sourceType == PlanSourceType.ALBUM) state.selectedAlbumId.orEmpty() else "",
+                sourceAlbum = if (isAlbum) state.selectedAlbumId.orEmpty() else "",
                 sourceType = state.sourceType.name,
-                folderPath = if (state.sourceType == PlanSourceType.FOLDER) state.folderPath.trim() else "",
-                includeVideos = state.sourceType == PlanSourceType.ALBUM && state.includeVideos,
-                useAlbumTemplating = state.sourceType == PlanSourceType.ALBUM && state.useAlbumTemplating,
+                folderPath = when {
+                    isFolder -> state.folderPath.trim()
+                    state.sourceType == PlanSourceType.FULL_DEVICE -> FULL_DEVICE_PRESET
+                    else -> ""
+                },
+                includeVideos = isAlbum && state.includeVideos,
+                useAlbumTemplating = isAlbum && state.useAlbumTemplating,
                 serverId = requireNotNull(state.selectedServerId),
-                directoryTemplate = if (state.sourceType == PlanSourceType.ALBUM && state.useAlbumTemplating) state.directoryTemplate.trim() else "",
-                filenamePattern = if (state.sourceType == PlanSourceType.ALBUM && state.useAlbumTemplating) state.filenamePattern.trim() else "",
+                directoryTemplate = if (isAlbum && state.useAlbumTemplating) state.directoryTemplate.trim() else "",
+                filenamePattern = if (isAlbum && state.useAlbumTemplating) state.filenamePattern.trim() else "",
                 enabled = state.enabled,
             )
 
@@ -217,6 +223,8 @@ class PlansViewModel(
         PlanSourceType.entries.firstOrNull { it.name == value } ?: PlanSourceType.ALBUM
 
     companion object {
+        private const val FULL_DEVICE_PRESET = "FULL_DEVICE_COPYABLE_STORAGE"
+
         fun factory(
             planRepository: PlanRepository,
             serverRepository: ServerRepository,

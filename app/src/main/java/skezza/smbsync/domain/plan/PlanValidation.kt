@@ -3,6 +3,7 @@ package skezza.smbsync.domain.plan
 enum class PlanSourceType {
     ALBUM,
     FOLDER,
+    FULL_DEVICE,
 }
 
 data class PlanInput(

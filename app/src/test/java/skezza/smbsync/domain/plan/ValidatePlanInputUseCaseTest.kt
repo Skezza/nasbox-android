@@ -53,15 +53,15 @@ class ValidatePlanInputUseCaseTest {
     }
 
     @Test
-    fun invoke_acceptsValidInputWithoutTemplating() {
+    fun invoke_acceptsFullDevicePlanWithoutFolderOrAlbum() {
         val result = useCase(
             PlanInput(
-                name = "Family Photos",
-                sourceType = PlanSourceType.ALBUM,
-                selectedAlbumId = "123",
+                name = "Phone backup",
+                sourceType = PlanSourceType.FULL_DEVICE,
+                selectedAlbumId = null,
                 folderPath = "",
                 selectedServerId = 42L,
-                includeVideos = true,
+                includeVideos = false,
                 useAlbumTemplating = false,
                 directoryTemplate = "",
                 filenamePattern = "",
