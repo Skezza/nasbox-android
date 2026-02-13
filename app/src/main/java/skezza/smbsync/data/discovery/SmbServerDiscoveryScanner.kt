@@ -122,8 +122,8 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
         local ?: return emptyList()
         return runCatching {
             JmDNS.create(local).use { jmDns ->
-                jmDns.list("_smb._tcp.local.", 1200)
-                    .flatMap { serviceInfo ->
+                mdnsServiceTypes().flatMap { serviceType ->
+                    jmDns.list(serviceType, 1200).flatMap { serviceInfo ->
                         serviceInfo.hostAddresses.orEmpty().mapNotNull { ip ->
                             val normalizedIp = ip.trim().removePrefix("/")
                             if (normalizedIp.isBlank()) {
@@ -137,10 +137,21 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
                             }
                         }
                     }
+                }
             }
         }.getOrDefault(emptyList())
-            .distinctBy { it.ipAddress }
+            .groupBy { it.ipAddress }
+            .mapNotNull { (ip, entries) ->
+                val preferred = entries.firstOrNull { it.host != ip } ?: entries.firstOrNull()
+                preferred?.copy(ipAddress = ip)
+            }
     }
+
+    private fun mdnsServiceTypes(): List<String> = listOf(
+        "_smb._tcp.local.",
+        "_workstation._tcp.local.",
+        "_device-info._tcp.local.",
+    )
 
     private suspend fun probeCommonLocalHostnames(): List<DiscoveredSmbServer> = coroutineScope {
         commonHostnameCandidates().map { host ->
