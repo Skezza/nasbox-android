@@ -1,5 +1,7 @@
 package skezza.smbsync.data.discovery
 
+import android.content.Context
+import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.Inet4Address
@@ -26,7 +28,9 @@ interface SmbServerDiscoveryScanner {
     suspend fun discover(): List<DiscoveredSmbServer>
 }
 
-class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
+class AndroidSmbServerDiscoveryScanner(
+    private val context: Context,
+) : SmbServerDiscoveryScanner {
 
     override suspend fun discover(): List<DiscoveredSmbServer> = withContext(Dispatchers.IO) {
         val local = localIPv4Address()
@@ -122,31 +126,46 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
 
     private fun discoverViaMdns(local: Inet4Address?): List<DiscoveredSmbServer> {
         local ?: return emptyList()
-        return runCatching {
-            JmDNS.create(local).use { jmDns ->
-                mdnsServiceTypes().flatMap { serviceType ->
-                    jmDns.list(serviceType, 1200).flatMap { serviceInfo ->
-                        serviceInfo.hostAddresses.orEmpty().mapNotNull { ip ->
-                            val normalizedIp = ip.trim().removePrefix("/")
-                            if (normalizedIp.isBlank()) {
-                                null
-                            } else {
-                                val resolvedName = serviceInfo.name.ifBlank { normalizedIp }
-                                DiscoveredSmbServer(
-                                    host = if (resolvedName.endsWith(".local", ignoreCase = true)) resolvedName else "$resolvedName.local",
-                                    ipAddress = normalizedIp,
-                                )
+        return withMulticastLock {
+            runCatching {
+                JmDNS.create(local).use { jmDns ->
+                    mdnsServiceTypes().flatMap { serviceType ->
+                        jmDns.list(serviceType, 1600).flatMap { serviceInfo ->
+                            serviceInfo.hostAddresses.orEmpty().mapNotNull { ip ->
+                                val normalizedIp = ip.trim().removePrefix("/")
+                                if (normalizedIp.isBlank()) {
+                                    null
+                                } else {
+                                    val resolvedName = serviceInfo.name.ifBlank { normalizedIp }
+                                    DiscoveredSmbServer(
+                                        host = if (resolvedName.endsWith(".local", ignoreCase = true)) resolvedName else "$resolvedName.local",
+                                        ipAddress = normalizedIp,
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
-        }.getOrDefault(emptyList())
-            .groupBy { it.ipAddress }
-            .mapNotNull { (ip, entries) ->
-                val preferred = entries.firstOrNull { it.host != ip } ?: entries.firstOrNull()
-                preferred?.copy(ipAddress = ip)
-            }
+            }.getOrDefault(emptyList())
+                .groupBy { it.ipAddress }
+                .mapNotNull { (ip, entries) ->
+                    val preferred = entries.firstOrNull { it.host != ip } ?: entries.firstOrNull()
+                    preferred?.copy(ipAddress = ip)
+                }
+        }
+    }
+
+
+    private fun <T> withMulticastLock(block: () -> T): T {
+        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val lock = wifiManager?.createMulticastLock("smbsync-mdns-lock")
+        lock?.setReferenceCounted(false)
+        lock?.acquire()
+        return try {
+            block()
+        } finally {
+            runCatching { lock?.release() }
+        }
     }
 
     private fun mdnsServiceTypes(): List<String> = listOf(

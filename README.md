@@ -36,6 +36,7 @@ Vault also provides a **Discover servers** action that scans the current Wi-Fi s
 
 - App manifest must include `android.permission.INTERNET` for SMB socket connectivity.
 - `android.permission.ACCESS_NETWORK_STATE` is included so network availability diagnostics can be surfaced in UX improvements.
+- `android.permission.CHANGE_WIFI_MULTICAST_STATE` is used so mDNS discovery can acquire multicast lock reliably on Android devices.
 - For mDNS hosts like `quanta.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
 - Discovery reliability is lower on Android emulators because guest networking (NAT) may block broadcast/mDNS/LAN reachability; prefer testing discovery on a physical device.
 
