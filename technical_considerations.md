@@ -228,6 +228,7 @@ Each mapped error should provide:
 - Connection tests are orchestrated by a domain use case that supports both persisted Vault servers and in-editor draft credentials.
 - Host normalization accepts either plain host input or URI-style values such as `smb://host/share`, including share extraction when provided in host field.
 - Vault includes optional SMB discovery on the local network (port 445 probing on local subnet with mDNS SMB service lookups for host-name enrichment and fallback checks for common `.local` SMB hostnames) to assist server setup; discovered hosts are advisory and still require credential validation.
+- Share/root folder browsing over SMB is intentionally deferred beyond current MVP Phase 3 UX scope despite discovery enhancements.
 - SMB failures are normalized into MVP error taxonomy categories and surfaced as concise user-facing messages with recovery hints.
 - Server persistence now records test telemetry (`status`, `timestamp`, `latency`, and mapped error category/message) for vault health and upcoming dashboard status aggregation.
 - Room schema was incremented to version 2 with an explicit migration adding test metadata columns to `servers` to preserve upgrade compatibility.

@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -203,11 +206,13 @@ fun ServerEditorScreen(
         },
         modifier = modifier,
     ) { innerPadding ->
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             ServerField("Name", state.name, state.validation.nameError) {
@@ -306,20 +311,29 @@ private fun DiscoveryDialog(
                 if (!state.isScanning && state.servers.isEmpty() && state.errorMessage == null) {
                     Text("No SMB servers discovered.")
                 }
-                state.servers.forEach { server ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onUseServer(server) }
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column {
-                            Text(server.host)
-                            Text(server.ipAddress)
-                        }
-                        TextButton(onClick = { onUseServer(server) }) {
-                            Text("Use")
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.heightIn(max = 260.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(state.servers, key = { it.ipAddress }) { server ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onUseServer(server) }
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                if (server.host.equals(server.ipAddress, ignoreCase = true)) {
+                                    Text(server.ipAddress)
+                                } else {
+                                    Text(server.host)
+                                    Text(server.ipAddress)
+                                }
+                            }
+                            TextButton(onClick = { onUseServer(server) }) {
+                                Text("Use")
+                            }
                         }
                     }
                 }

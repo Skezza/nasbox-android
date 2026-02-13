@@ -106,6 +106,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Completed: Vault list and server editor now expose connection test actions with inline progress and snackbar feedback.
 - ✅ Completed: mapped failure categories are persisted as server test metadata for downstream vault/dashboard health surfaces.
 - ✅ Scope extension (unplanned, user-requested): Vault now includes local-network SMB discovery (subnet probing + mDNS host enrichment + `.local` fallback host checks) to prefill server editor values from reachable SMB endpoints on Wi-Fi.
+- ⚠️ Deferred by request: share/root folder browsing from discovered hosts remains out of scope for current Phase 3 UX and will be revisited in a later phase.
 
 ---
 
