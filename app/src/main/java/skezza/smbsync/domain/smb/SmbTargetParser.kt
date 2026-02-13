@@ -27,15 +27,10 @@ object SmbTargetParser {
         val parsedHost = hostSegments.first()
         val shareFromHost = hostSegments.getOrNull(1)
         val resolvedShare = when {
+            rawShare == "/" -> ""
             rawShare.isNotEmpty() -> rawShare
             !shareFromHost.isNullOrBlank() -> shareFromHost
-            else -> null
-        }
-
-        if (resolvedShare.isNullOrBlank()) {
-            return ParsedSmbTargetResult.Error(
-                "Share is required. Enter it separately or use host format smb://host/share.",
-            )
+            else -> ""
         }
 
         return ParsedSmbTargetResult.Success(

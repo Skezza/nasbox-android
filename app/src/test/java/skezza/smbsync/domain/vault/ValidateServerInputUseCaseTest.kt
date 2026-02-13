@@ -42,6 +42,22 @@ class ValidateServerInputUseCaseTest {
     }
 
     @Test
+    fun acceptsValidInputWithoutShareForRootValidation() {
+        val result = useCase(
+            ServerInput(
+                name = "Home NAS",
+                host = "quanta.local",
+                shareName = "",
+                basePath = "backup",
+                username = "user",
+                password = "secret",
+            ),
+        )
+
+        assertTrue(result.isValid)
+    }
+
+    @Test
     fun acceptsValidInput() {
         val result = useCase(
             ServerInput(

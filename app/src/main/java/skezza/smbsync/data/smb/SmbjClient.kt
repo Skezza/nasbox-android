@@ -16,7 +16,12 @@ class SmbjClient : SmbClient {
                 smbClient.connect(request.host).use { connection ->
                     val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
                     connection.authenticate(authContext).use { session ->
-                        session.connectShare(request.shareName).close()
+                        if (request.shareName.isBlank()) {
+                            // Root-level validation: auth + session establishment only.
+                            session.username
+                        } else {
+                            session.connectShare(request.shareName).close()
+                        }
                     }
                 }
             }

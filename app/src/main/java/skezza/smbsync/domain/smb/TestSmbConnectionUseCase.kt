@@ -86,7 +86,7 @@ class TestSmbConnectionUseCase(
             onSuccess = {
                 SmbConnectionUiResult.success(
                     latencyMs = it.latencyMs,
-                    endpoint = "${target.host}/${target.shareName}",
+                    endpoint = if (target.shareName.isBlank()) target.host else "${target.host}/${target.shareName}",
                 )
             },
             onFailure = { throwable ->

@@ -39,7 +39,7 @@ class VaultViewModel(
                 ServerListItemUiState(
                     serverId = it.serverId,
                     name = it.name,
-                    endpoint = "${it.host}/${it.shareName}",
+                    endpoint = formatEndpoint(it.host, it.shareName),
                     basePath = it.basePath,
                     lastTestStatus = it.lastTestStatus,
                     lastTestTimestampEpochMs = it.lastTestTimestampEpochMs,
@@ -72,8 +72,8 @@ class VaultViewModel(
                 ServerEditorUiState()
             } else {
                 ServerEditorUiState(
-                    name = "${discovery.host} SMB",
-                    host = discovery.host,
+                    name = discovery.host,
+                    host = discovery.ipAddress,
                     shareName = "",
                     basePath = "backup",
                 )
@@ -138,7 +138,7 @@ class VaultViewModel(
                     serverId = state.editingServerId ?: 0,
                     name = state.name.trim(),
                     host = state.host.trim(),
-                    shareName = state.shareName.trim(),
+                    shareName = normalizeShare(state.shareName),
                     basePath = state.basePath.trim(),
                     username = state.username.trim(),
                     credentialAlias = credentialAlias,
@@ -251,6 +251,11 @@ class VaultViewModel(
     }
 
     private fun newAlias(): String = "vault/${UUID.randomUUID()}"
+
+    private fun normalizeShare(value: String): String = value.trim().trim('/').trim('\\')
+
+    private fun formatEndpoint(host: String, shareName: String): String =
+        if (shareName.isBlank()) host else "$host/$shareName"
 
     companion object {
         fun factory(

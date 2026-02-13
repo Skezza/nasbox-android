@@ -230,7 +230,7 @@ fun ServerEditorScreen(
                 label = "Share",
                 value = state.shareName,
                 error = state.validation.shareNameError,
-                helperText = "Can be left blank if host is smb://host/share",
+                helperText = "Optional for root-level validation; can be in host as smb://host/share",
             ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
