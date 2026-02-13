@@ -1,5 +1,7 @@
 package skezza.smbsync.data.discovery
 
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -70,7 +72,7 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
                     semaphore.withPermit {
                         if (isSmbPortOpen(ip)) {
                             DiscoveredSmbServer(
-                                host = reverseLookupName(ip) ?: ip,
+                                host = reverseLookupName(ip) ?: resolveNetBiosHostname(ip) ?: ip,
                                 ipAddress = ip,
                             )
                         } else {
@@ -189,6 +191,95 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
             val name = lookup.hostName
             if (name == ip) null else name
         }.getOrNull()
+    }
+
+
+    private fun resolveNetBiosHostname(ip: String): String? {
+        return runCatching {
+            DatagramSocket().use { socket ->
+                socket.soTimeout = 400
+                val request = ByteArray(50)
+                val transactionId = (System.currentTimeMillis() and 0xFFFF).toInt()
+                request[0] = (transactionId shr 8).toByte()
+                request[1] = transactionId.toByte()
+                request[2] = 0x00
+                request[3] = 0x00
+                request[4] = 0x00
+                request[5] = 0x01
+                request[6] = 0x00
+                request[7] = 0x00
+                request[8] = 0x00
+                request[9] = 0x00
+                request[10] = 0x00
+                request[11] = 0x00
+                request[12] = 0x20
+
+                var idx = 13
+                request[idx++] = 0x43
+                request[idx++] = 0x4B
+                repeat(15) {
+                    request[idx++] = 0x41
+                }
+                request[idx++] = 0x41
+                request[idx++] = 0x41
+                request[idx++] = 0x00
+                request[idx++] = 0x00
+                request[idx++] = 0x21
+                request[idx++] = 0x00
+                request[idx] = 0x01
+
+                val packet = DatagramPacket(request, request.size, InetAddress.getByName(ip), 137)
+                socket.send(packet)
+
+                val response = ByteArray(1024)
+                val responsePacket = DatagramPacket(response, response.size)
+                socket.receive(responsePacket)
+
+                parseNetBiosResponse(responsePacket.data, responsePacket.length)
+            }
+        }.getOrNull()
+    }
+
+    private fun parseNetBiosResponse(data: ByteArray, length: Int): String? {
+        if (length < 57) return null
+        val answerCount = ((data[6].toInt() and 0xFF) shl 8) or (data[7].toInt() and 0xFF)
+        if (answerCount <= 0) return null
+
+        // Walk past question section (fixed-size for our query) and answer header.
+        var offset = 12
+        while (offset < length && data[offset].toInt() != 0) {
+            offset += (data[offset].toInt() and 0xFF) + 1
+        }
+        offset += 5
+        if (offset + 12 >= length) return null
+
+        // Name pointer + type + class + ttl + rdlength
+        offset += 10
+        val rdLength = ((data[offset].toInt() and 0xFF) shl 8) or (data[offset + 1].toInt() and 0xFF)
+        offset += 2
+        if (offset + rdLength > length || rdLength < 1) return null
+
+        val nameCount = data[offset].toInt() and 0xFF
+        offset += 1
+
+        var best: String? = null
+        repeat(nameCount) {
+            if (offset + 18 > length) return@repeat
+            val rawName = data.copyOfRange(offset, offset + 15)
+                .toString(Charsets.US_ASCII)
+                .trim()
+            val suffix = data[offset + 15].toInt() and 0xFF
+            if (rawName.isNotBlank()) {
+                if (suffix == 0x20) {
+                    best = rawName
+                } else if (best == null && suffix == 0x00) {
+                    best = rawName
+                }
+            }
+            offset += 18
+        }
+
+        return best?.lowercase()?.let { if (it.endsWith(".local")) it else "$it.local" }
     }
 
     private fun ipv4ToInt(address: Inet4Address): Int {
