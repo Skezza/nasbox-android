@@ -6,14 +6,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.TravelExplore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedButton
@@ -25,13 +31,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +54,9 @@ fun VaultScreen(
 ) {
     val servers by viewModel.servers.collectAsState()
     val message by viewModel.message.collectAsState()
+    val discoveryState by viewModel.discoveryState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var showDiscoveryDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
@@ -58,6 +70,12 @@ fun VaultScreen(
             TopAppBar(
                 title = { Text("Vault") },
                 actions = {
+                    IconButton(onClick = {
+                        showDiscoveryDialog = true
+                        viewModel.discoverServers()
+                    }) {
+                        Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
+                    }
                     IconButton(onClick = onAddServer) {
                         Icon(Icons.Default.Add, contentDescription = "Add server")
                     }
@@ -66,6 +84,23 @@ fun VaultScreen(
         },
         modifier = modifier,
     ) { innerPadding ->
+        if (showDiscoveryDialog) {
+            DiscoveryDialog(
+                state = discoveryState,
+                onDismiss = {
+                    showDiscoveryDialog = false
+                    viewModel.clearDiscoveryState()
+                },
+                onRefresh = viewModel::discoverServers,
+                onUseServer = { discovered ->
+                    viewModel.setDiscoverySelection(discovered)
+                    showDiscoveryDialog = false
+                    viewModel.clearDiscoveryState()
+                    onAddServer()
+                },
+            )
+        }
+
         if (servers.isEmpty()) {
             Column(
                 modifier = Modifier
@@ -94,23 +129,37 @@ fun VaultScreen(
                             .fillMaxWidth()
                             .clickable { onEditServer(server.serverId) },
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(server.name)
-                                Text(server.endpoint)
-                                Text("Base: ${server.basePath}")
+                            Text(server.name)
+                            Text(server.endpoint)
+                            Text("Base: ${server.basePath}")
+                            Text(server.connectionStatusLabel())
+                            if (server.lastTestStatus == "FAILED" && !server.lastTestErrorMessage.isNullOrBlank()) {
+                                Text("Last error: ${server.lastTestErrorMessage}")
                             }
-                            Row {
-                                IconButton(onClick = { onEditServer(server.serverId) }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit server")
+                            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                Row {
+                                    IconButton(onClick = { onEditServer(server.serverId) }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit server")
+                                    }
+                                    IconButton(onClick = { viewModel.deleteServer(server.serverId) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete server")
+                                    }
                                 }
-                                IconButton(onClick = { viewModel.deleteServer(server.serverId) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete server")
+                                ElevatedButton(
+                                    onClick = { viewModel.testServerConnection(server.serverId) },
+                                    enabled = !server.isTesting,
+                                ) {
+                                    Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                                    Text(
+                                        if (server.isTesting) "Testing..." else "Test",
+                                        modifier = Modifier.padding(start = 8.dp),
+                                    )
                                 }
                             }
                         }
@@ -150,27 +199,39 @@ fun ServerEditorScreen(
                 title = { Text(if (serverId == null) "Add Server" else "Edit Server") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
             )
         },
         modifier = modifier,
     ) { innerPadding ->
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             ServerField("Name", state.name, state.validation.nameError) {
                 viewModel.updateEditorField(ServerEditorField.NAME, it)
             }
-            ServerField("Host", state.host, state.validation.hostError) {
+            ServerField(
+                label = "Host",
+                value = state.host,
+                error = state.validation.hostError,
+                helperText = "Examples: quanta.local or smb://quanta.local/photos",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
-            ServerField("Share", state.shareName, state.validation.shareNameError) {
+            ServerField(
+                label = "Share",
+                value = state.shareName,
+                error = state.validation.shareNameError,
+                helperText = "Optional for root-level validation; can be in host as smb://host/share",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
             ServerField("Base path", state.basePath, state.validation.basePathError) {
@@ -179,12 +240,25 @@ fun ServerEditorScreen(
             ServerField("Username", state.username, state.validation.usernameError) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
-            ServerField("Password", state.password, state.validation.passwordError) {
+            ServerField(
+                label = "Password",
+                value = state.password,
+                error = state.validation.passwordError,
+                isPassword = true,
+            ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
-            Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
-                Text(if (serverId == null) "Create server" else "Save changes")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
+                    Text(if (serverId == null) "Create server" else "Save changes")
+                }
+                ElevatedButton(
+                    onClick = viewModel::testEditorConnection,
+                    enabled = !state.isTestingConnection,
+                ) {
+                    Text(if (state.isTestingConnection) "Testing..." else "Test connection")
+                }
             }
         }
     }
@@ -195,6 +269,8 @@ private fun ServerField(
     label: String,
     value: String,
     error: String?,
+    helperText: String? = null,
+    isPassword: Boolean = false,
     onChange: (String) -> Unit,
 ) {
     OutlinedTextField(
@@ -202,11 +278,84 @@ private fun ServerField(
         onValueChange = onChange,
         label = { Text(label) },
         isError = error != null,
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         modifier = Modifier.fillMaxWidth(),
         supportingText = {
-            if (error != null) {
-                Text(error)
+            when {
+                error != null -> Text(error)
+                !helperText.isNullOrBlank() -> Text(helperText)
             }
         },
     )
+}
+
+@Composable
+private fun DiscoveryDialog(
+    state: DiscoveryUiState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onUseServer: (skezza.smbsync.data.discovery.DiscoveredSmbServer) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Discover SMB Servers") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Scanning local Wi-Fi subnet for devices with SMB port 445 open.")
+                if (state.isScanning) {
+                    Text("Scanning...")
+                }
+                if (state.errorMessage != null) {
+                    Text(state.errorMessage)
+                }
+                if (!state.isScanning && state.servers.isEmpty() && state.errorMessage == null) {
+                    Text("No SMB servers discovered.")
+                }
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.heightIn(max = 260.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(state.servers, key = { it.ipAddress }) { server ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onUseServer(server) }
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column {
+                                if (server.host.equals(server.ipAddress, ignoreCase = true)) {
+                                    Text(server.ipAddress)
+                                } else {
+                                    Text(server.host)
+                                    Text(server.ipAddress)
+                                }
+                            }
+                            TextButton(onClick = { onUseServer(server) }) {
+                                Text("Use")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRefresh, enabled = !state.isScanning) {
+                Text(if (state.isScanning) "Scanning" else "Scan again")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+private fun ServerListItemUiState.connectionStatusLabel(): String {
+    return when (lastTestStatus) {
+        "SUCCESS" -> "Connection: Passed${lastTestLatencyMs?.let { " (${it}ms)" } ?: ""}"
+        "FAILED" -> "Connection: Failed"
+        else -> "Connection: Not tested"
+    }
 }

@@ -7,7 +7,8 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
 - ✅ Phase 1 — Persistence foundation: **Completed**.
 - ✅ Phase 2 — Credential security and Vault management: **Completed**.
-- ⏳ Phase 3 — SMB connectivity and test flow: **Next**.
+- ✅ Phase 3 — SMB connectivity and test flow: **Completed**.
+- ⏳ Phase 4 — Media source integration and Plan management: **Next**.
 
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
@@ -98,6 +99,14 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Exit criteria
 - Connection test can succeed/fail with clear, actionable feedback.
 - Test metadata is persisted for dashboard/vault health presentation.
+
+### Implementation status
+- ✅ Completed: SMBJ is integrated behind a `SmbClient` wrapper abstraction to keep protocol calls out of UI/domain layers.
+- ✅ Completed: a dedicated connection test use case validates host/share/auth and records latency for successful checks.
+- ✅ Completed: Vault list and server editor now expose connection test actions with inline progress and snackbar feedback.
+- ✅ Completed: mapped failure categories are persisted as server test metadata for downstream vault/dashboard health surfaces.
+- ✅ Scope extension (unplanned, user-requested): Vault now includes local-network SMB discovery (subnet probing + mDNS host enrichment + `.local` fallback host checks) to prefill server editor values from reachable SMB endpoints on Wi-Fi.
+- ⚠️ Deferred by request: share/root folder browsing from discovered hosts remains out of scope for current Phase 3 UX and will be revisited in a later phase.
 
 ---
 

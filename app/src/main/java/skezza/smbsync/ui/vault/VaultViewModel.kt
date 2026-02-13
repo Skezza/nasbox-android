@@ -9,12 +9,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import skezza.smbsync.data.db.ServerEntity
+import skezza.smbsync.data.discovery.DiscoveredSmbServer
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
+import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 import skezza.smbsync.domain.vault.ServerInput
 import skezza.smbsync.domain.vault.ServerValidationResult
 import skezza.smbsync.domain.vault.ValidateServerInputUseCase
@@ -22,17 +25,27 @@ import skezza.smbsync.domain.vault.ValidateServerInputUseCase
 class VaultViewModel(
     private val serverRepository: ServerRepository,
     private val credentialStore: CredentialStore,
+    private val testSmbConnectionUseCase: TestSmbConnectionUseCase,
+    private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
 ) : ViewModel() {
 
+    private val testingServerIds = MutableStateFlow<Set<Long>>(emptySet())
+    private var pendingDiscoverySelection: DiscoveredSmbServer? = null
+
     val servers: StateFlow<List<ServerListItemUiState>> = serverRepository.observeServers()
-        .map { servers ->
+        .combine(testingServerIds) { servers, testing ->
             servers.map {
                 ServerListItemUiState(
                     serverId = it.serverId,
                     name = it.name,
-                    endpoint = "${it.host}/${it.shareName}",
+                    endpoint = formatEndpoint(it.host, it.shareName),
                     basePath = it.basePath,
+                    lastTestStatus = it.lastTestStatus,
+                    lastTestTimestampEpochMs = it.lastTestTimestampEpochMs,
+                    lastTestLatencyMs = it.lastTestLatencyMs,
+                    lastTestErrorMessage = it.lastTestErrorMessage,
+                    isTesting = testing.contains(it.serverId),
                 )
             }
         }
@@ -44,13 +57,27 @@ class VaultViewModel(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    private val _discoveryState = MutableStateFlow(DiscoveryUiState())
+    val discoveryState: StateFlow<DiscoveryUiState> = _discoveryState.asStateFlow()
+
     fun clearMessage() {
         _message.value = null
     }
 
     fun loadServerForEdit(serverId: Long?) {
         if (serverId == null) {
-            _editorState.value = ServerEditorUiState()
+            val discovery = pendingDiscoverySelection
+            pendingDiscoverySelection = null
+            _editorState.value = if (discovery == null) {
+                ServerEditorUiState()
+            } else {
+                ServerEditorUiState(
+                    name = discovery.host,
+                    host = discovery.ipAddress,
+                    shareName = "",
+                    basePath = "backup",
+                )
+            }
             clearMessage()
             return
         }
@@ -111,7 +138,7 @@ class VaultViewModel(
                     serverId = state.editingServerId ?: 0,
                     name = state.name.trim(),
                     host = state.host.trim(),
-                    shareName = state.shareName.trim(),
+                    shareName = normalizeShare(state.shareName),
                     basePath = state.basePath.trim(),
                     username = state.username.trim(),
                     credentialAlias = credentialAlias,
@@ -132,6 +159,85 @@ class VaultViewModel(
         }
     }
 
+    fun testServerConnection(serverId: Long) {
+        viewModelScope.launch {
+            testingServerIds.value = testingServerIds.value + serverId
+            runCatching {
+                val result = testSmbConnectionUseCase.testPersistedServer(serverId)
+                _message.value = listOfNotNull(result.message, result.recoveryHint, result.technicalDetail).joinToString(" ")
+            }.onFailure {
+                _message.value = "Connection test failed due to an unexpected error."
+            }
+            testingServerIds.value = testingServerIds.value - serverId
+        }
+    }
+
+    fun testEditorConnection() {
+        viewModelScope.launch {
+            val current = _editorState.value
+            val validation = validateServerInput(
+                ServerInput(
+                    name = current.name,
+                    host = current.host,
+                    shareName = current.shareName,
+                    basePath = current.basePath,
+                    username = current.username,
+                    password = current.password,
+                ),
+            )
+            if (!validation.isValid) {
+                _editorState.value = current.copy(validation = validation)
+                _message.value = "Fix validation errors before testing connection."
+                return@launch
+            }
+
+            _editorState.value = current.copy(isTestingConnection = true)
+            runCatching {
+                val result = testSmbConnectionUseCase.testDraftServer(
+                    host = current.host,
+                    shareName = current.shareName,
+                    username = current.username,
+                    password = current.password,
+                )
+                _message.value = listOfNotNull(result.message, result.recoveryHint, result.technicalDetail).joinToString(" ")
+            }.onFailure {
+                _message.value = "Connection test failed due to an unexpected error."
+            }
+            _editorState.value = _editorState.value.copy(isTestingConnection = false)
+        }
+    }
+
+    fun discoverServers() {
+        viewModelScope.launch {
+            _discoveryState.value = _discoveryState.value.copy(isScanning = true, errorMessage = null)
+            runCatching {
+                discoverSmbServersUseCase()
+            }.onSuccess { servers ->
+                _discoveryState.value = DiscoveryUiState(
+                    isScanning = false,
+                    servers = servers,
+                    errorMessage = null,
+                )
+                if (servers.isEmpty()) {
+                    _message.value = "No SMB servers discovered. On Android emulators, LAN/mDNS discovery is often blocked by NAT. Try on a physical device or enter smb://quanta.local/<share> manually."
+                }
+            }.onFailure {
+                _discoveryState.value = _discoveryState.value.copy(
+                    isScanning = false,
+                    errorMessage = "Failed to scan the local network.",
+                )
+            }
+        }
+    }
+
+    fun setDiscoverySelection(server: DiscoveredSmbServer) {
+        pendingDiscoverySelection = server
+    }
+
+    fun clearDiscoveryState() {
+        _discoveryState.value = DiscoveryUiState()
+    }
+
     fun deleteServer(serverId: Long) {
         viewModelScope.launch {
             runCatching {
@@ -146,15 +252,27 @@ class VaultViewModel(
 
     private fun newAlias(): String = "vault/${UUID.randomUUID()}"
 
+    private fun normalizeShare(value: String): String = value.trim().trim('/').trim('\\')
+
+    private fun formatEndpoint(host: String, shareName: String): String =
+        if (shareName.isBlank()) host else "$host/$shareName"
+
     companion object {
         fun factory(
             serverRepository: ServerRepository,
             credentialStore: CredentialStore,
+            testSmbConnectionUseCase: TestSmbConnectionUseCase,
+            discoverSmbServersUseCase: DiscoverSmbServersUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(VaultViewModel::class.java)) {
                     @Suppress("UNCHECKED_CAST")
-                    return VaultViewModel(serverRepository, credentialStore) as T
+                    return VaultViewModel(
+                        serverRepository = serverRepository,
+                        credentialStore = credentialStore,
+                        testSmbConnectionUseCase = testSmbConnectionUseCase,
+                        discoverSmbServersUseCase = discoverSmbServersUseCase,
+                    ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }
@@ -180,6 +298,11 @@ data class ServerListItemUiState(
     val name: String,
     val endpoint: String,
     val basePath: String,
+    val lastTestStatus: String? = null,
+    val lastTestTimestampEpochMs: Long? = null,
+    val lastTestLatencyMs: Long? = null,
+    val lastTestErrorMessage: String? = null,
+    val isTesting: Boolean = false,
 )
 
 data class ServerEditorUiState(
@@ -191,6 +314,7 @@ data class ServerEditorUiState(
     val username: String = "",
     val password: String = "",
     val validation: ServerValidationResult = ServerValidationResult(),
+    val isTestingConnection: Boolean = false,
 ) {
     fun updateField(field: ServerEditorField, value: String): ServerEditorUiState {
         return when (field) {
@@ -203,3 +327,9 @@ data class ServerEditorUiState(
         }
     }
 }
+
+data class DiscoveryUiState(
+    val isScanning: Boolean = false,
+    val servers: List<DiscoveredSmbServer> = emptyList(),
+    val errorMessage: String? = null,
+)

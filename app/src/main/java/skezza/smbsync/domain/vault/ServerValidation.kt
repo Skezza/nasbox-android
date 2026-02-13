@@ -1,5 +1,8 @@
 package skezza.smbsync.domain.vault
 
+import skezza.smbsync.domain.smb.ParsedSmbTargetResult
+import skezza.smbsync.domain.smb.SmbTargetParser
+
 data class ServerInput(
     val name: String,
     val host: String,
@@ -29,10 +32,11 @@ data class ServerValidationResult(
 
 class ValidateServerInputUseCase {
     operator fun invoke(input: ServerInput): ServerValidationResult {
+        val parsedTarget = SmbTargetParser.parse(input.host, input.shareName)
         return ServerValidationResult(
             nameError = input.name.requireValue("Server name is required."),
-            hostError = input.host.requireValue("Host is required."),
-            shareNameError = input.shareName.requireValue("Share is required."),
+            hostError = if (parsedTarget is ParsedSmbTargetResult.Error) parsedTarget.message else null,
+            shareNameError = if (parsedTarget is ParsedSmbTargetResult.Error) parsedTarget.message else null,
             basePathError = input.basePath.requireValue("Base path is required."),
             usernameError = input.username.requireValue("Username is required."),
             passwordError = input.password.requireValue("Password is required."),

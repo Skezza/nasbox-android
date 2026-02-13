@@ -9,12 +9,18 @@ import org.junit.Test
 import skezza.smbsync.data.db.ServerEntity
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
+import skezza.smbsync.data.smb.SmbClient
+import skezza.smbsync.data.smb.SmbConnectionRequest
+import skezza.smbsync.data.smb.SmbConnectionResult
+import skezza.smbsync.data.discovery.SmbServerDiscoveryScanner
+import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 
 class VaultViewModelFactoryTest {
 
     @Test
     fun factoryCreateWithClassAndExtras_returnsVaultViewModel() {
-        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore())
+        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase())
 
         val vmFromClass = factory.create(VaultViewModel::class.java)
         val vmFromExtras = factory.create(VaultViewModel::class.java, MutableCreationExtras())
@@ -25,9 +31,26 @@ class VaultViewModelFactoryTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun factoryRejectsUnknownViewModelClass() {
-        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore())
+        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase())
         factory.create(UnknownViewModel::class.java)
     }
+
+
+
+    private fun fakeDiscoveryUseCase(): DiscoverSmbServersUseCase = DiscoverSmbServersUseCase(
+        scanner = object : SmbServerDiscoveryScanner {
+            override suspend fun discover() = emptyList<skezza.smbsync.data.discovery.DiscoveredSmbServer>()
+        },
+    )
+
+    private fun fakeUseCase(): TestSmbConnectionUseCase = TestSmbConnectionUseCase(
+        serverRepository = FakeServerRepository(),
+        credentialStore = FakeCredentialStore(),
+        smbClient = object : SmbClient {
+            override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
+                SmbConnectionResult(latencyMs = 1)
+        },
+    )
 
     private class FakeServerRepository : ServerRepository {
         override fun observeServers(): Flow<List<ServerEntity>> = flowOf(emptyList())
