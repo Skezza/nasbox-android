@@ -37,31 +37,50 @@ class AndroidSmbServerDiscoveryScanner(
         val subnetTargets = subnetTargets(local)
         val reachableByIp = scanTargets(subnetTargets)
         val mdnsDiscovered = discoverViaMdns(local)
+        val fallbackHostnames = probeCommonLocalHostnames()
 
-        val merged = mergeDiscoveryResults(reachableByIp, mdnsDiscovered)
-        if (merged.isNotEmpty()) {
-            return@withContext merged
-        }
-
-        probeCommonLocalHostnames()
+        mergeDiscoveryResults(
+            ipResults = reachableByIp,
+            mdnsResults = mdnsDiscovered,
+            fallbackResults = fallbackHostnames,
+        )
     }
 
     private fun mergeDiscoveryResults(
         ipResults: List<DiscoveredSmbServer>,
         mdnsResults: List<DiscoveredSmbServer>,
+        fallbackResults: List<DiscoveredSmbServer>,
     ): List<DiscoveredSmbServer> {
-        if (ipResults.isEmpty()) return mdnsResults.sortedBy { it.host }
+        val mergedByIp = linkedMapOf<String, DiscoveredSmbServer>()
 
-        val mdnsByIp = mdnsResults.associateBy { it.ipAddress }
-        return ipResults.map { server ->
-            val mdns = mdnsByIp[server.ipAddress]
-            if (mdns != null && (server.host == server.ipAddress || server.host.endsWith(".local", ignoreCase = true))) {
-                server.copy(host = mdns.host)
-            } else {
-                server
+        fun mergeEntry(candidate: DiscoveredSmbServer) {
+            val existing = mergedByIp[candidate.ipAddress]
+            if (existing == null) {
+                mergedByIp[candidate.ipAddress] = candidate
+                return
             }
-        }.distinctBy { it.ipAddress }
-            .sortedBy { it.host }
+
+            val existingIsIp = existing.host.equals(existing.ipAddress, ignoreCase = true)
+            val candidateIsIp = candidate.host.equals(candidate.ipAddress, ignoreCase = true)
+
+            val shouldReplace = when {
+                existingIsIp && !candidateIsIp -> true
+                !existingIsIp && candidateIsIp -> false
+                !existing.host.endsWith(".local", ignoreCase = true) &&
+                    candidate.host.endsWith(".local", ignoreCase = true) -> true
+                else -> false
+            }
+
+            if (shouldReplace) {
+                mergedByIp[candidate.ipAddress] = candidate
+            }
+        }
+
+        ipResults.forEach(::mergeEntry)
+        mdnsResults.forEach(::mergeEntry)
+        fallbackResults.forEach(::mergeEntry)
+
+        return mergedByIp.values.sortedBy { it.host }
     }
 
     private suspend fun scanTargets(targets: List<String>): List<DiscoveredSmbServer> {
