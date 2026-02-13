@@ -18,14 +18,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import skezza.smbsync.domain.plan.PlanSourceType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,10 +117,12 @@ fun PlansScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(plan.name)
-                            Text("Album: ${plan.album}")
+                            Text("Source: ${plan.sourceSummary}")
                             Text("Server: ${plan.serverName}")
-                            Text("Template: ${plan.template}")
-                            Text("Filename: ${plan.filenamePattern}")
+                            if (plan.useAlbumTemplating) {
+                                Text("Template: ${plan.template}")
+                                Text("Filename: ${plan.filenamePattern}")
+                            }
                             Text(if (plan.enabled) "Enabled" else "Disabled")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
@@ -155,6 +160,10 @@ fun PlanEditorScreen(
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
 
+    val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let { viewModel.updateEditorFolderPath(it.toString()) }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         viewModel.setMediaPermissionGranted(granted)
     }
@@ -185,24 +194,6 @@ fun PlanEditorScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (!hasMediaPermission) {
-                Text("Photo permission is required to list albums.")
-                Button(onClick = { permissionLauncher.launch(permission) }) {
-                    Text("Grant media access")
-                }
-            } else {
-                if (isLoadingAlbums) {
-                    Text("Loading albums...")
-                }
-                if (albums.isEmpty()) {
-                    Text("No albums found. Capture or import photos to create plans.")
-                }
-            }
-
-            if (servers.isEmpty()) {
-                Text("Add at least one server in Vault before creating a plan.")
-            }
-
             OutlinedTextField(
                 value = editorState.name,
                 onValueChange = viewModel::updateEditorName,
@@ -212,20 +203,56 @@ fun PlanEditorScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("Enabled")
-                Switch(checked = editorState.enabled, onCheckedChange = viewModel::updateEditorEnabled)
+            SourceTypeSelector(
+                selectedType = editorState.sourceType,
+                onSelect = viewModel::updateEditorSourceType,
+            )
+
+            if (editorState.sourceType == PlanSourceType.ALBUM) {
+                if (!hasMediaPermission) {
+                    Text("Photo permission is required to list albums.")
+                    Button(onClick = { permissionLauncher.launch(permission) }) { Text("Grant media access") }
+                } else {
+                    if (isLoadingAlbums) Text("Loading albums...")
+                    if (albums.isEmpty()) Text("No albums found. Capture or import photos to create plans.")
+                    AlbumSelector(
+                        options = albums,
+                        selectedAlbumId = editorState.selectedAlbumId,
+                        error = editorState.validation.albumError,
+                        onSelect = viewModel::updateEditorAlbum,
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Include videos")
+                        Switch(checked = editorState.includeVideos, onCheckedChange = viewModel::updateEditorIncludeVideos)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Use album templating")
+                        Switch(checked = editorState.useAlbumTemplating, onCheckedChange = viewModel::updateEditorUseAlbumTemplating)
+                    }
+                }
+            } else {
+                OutlinedTextField(
+                    value = editorState.folderPath,
+                    onValueChange = viewModel::updateEditorFolderPath,
+                    label = { Text("Folder URI/path") },
+                    supportingText = { editorState.validation.folderPathError?.let { Text(it) } },
+                    isError = editorState.validation.folderPathError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { folderLauncher.launch(null) }) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        Text("Choose folder", modifier = Modifier.padding(start = 6.dp))
+                    }
+                    ElevatedButton(onClick = { viewModel.updateEditorFolderPath("/storage/emulated/0/DCIM") }) {
+                        Text("Use DCIM")
+                    }
+                }
             }
 
-            AlbumSelector(
-                options = albums,
-                selectedAlbumId = editorState.selectedAlbumId,
-                error = editorState.validation.albumError,
-                onSelect = viewModel::updateEditorAlbum,
-            )
+            if (servers.isEmpty()) {
+                Text("Add at least one server in Vault before creating a plan.")
+            }
 
             ServerSelector(
                 options = servers,
@@ -234,32 +261,58 @@ fun PlanEditorScreen(
                 onSelect = viewModel::updateEditorServer,
             )
 
-            OutlinedTextField(
-                value = editorState.directoryTemplate,
-                onValueChange = viewModel::updateEditorDirectoryTemplate,
-                label = { Text("Directory template") },
-                supportingText = {
-                    Text(editorState.validation.templateError ?: "Example: {year}/{month}/{album}")
-                },
-                isError = editorState.validation.templateError != null,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (editorState.sourceType == PlanSourceType.ALBUM && editorState.useAlbumTemplating) {
+                OutlinedTextField(
+                    value = editorState.directoryTemplate,
+                    onValueChange = viewModel::updateEditorDirectoryTemplate,
+                    label = { Text("Directory template") },
+                    supportingText = {
+                        Text(editorState.validation.templateError ?: "Example: {year}/{month}/{album}")
+                    },
+                    isError = editorState.validation.templateError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
 
-            OutlinedTextField(
-                value = editorState.filenamePattern,
-                onValueChange = viewModel::updateEditorFilenamePattern,
-                label = { Text("Filename pattern") },
-                supportingText = {
-                    Text(editorState.validation.filenamePatternError ?: "Example: {timestamp}_{mediaId}.{ext}")
-                },
-                isError = editorState.validation.filenamePatternError != null,
-                modifier = Modifier.fillMaxWidth(),
-            )
+                OutlinedTextField(
+                    value = editorState.filenamePattern,
+                    onValueChange = viewModel::updateEditorFilenamePattern,
+                    label = { Text("Filename pattern") },
+                    supportingText = {
+                        Text(editorState.validation.filenamePatternError ?: "Example: {timestamp}_{mediaId}.{ext}")
+                    },
+                    isError = editorState.validation.filenamePatternError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Enabled")
+                Switch(checked = editorState.enabled, onCheckedChange = viewModel::updateEditorEnabled)
+            }
 
             Button(onClick = { viewModel.savePlan(onNavigateBack) }) {
                 Text(if (planId == null) "Create plan" else "Save changes")
             }
         }
+    }
+}
+
+@Composable
+private fun SourceTypeSelector(
+    selectedType: PlanSourceType,
+    onSelect: (PlanSourceType) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = selectedType == PlanSourceType.ALBUM,
+            onClick = { onSelect(PlanSourceType.ALBUM) },
+            label = { Text("Photo Album Plan") },
+        )
+        FilterChip(
+            selected = selectedType == PlanSourceType.FOLDER,
+            onClick = { onSelect(PlanSourceType.FOLDER) },
+            label = { Text("General Folder Plan") },
+        )
     }
 }
 

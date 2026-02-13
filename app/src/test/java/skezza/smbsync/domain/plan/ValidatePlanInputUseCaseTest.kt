@@ -9,12 +9,16 @@ class ValidatePlanInputUseCaseTest {
     private val useCase = ValidatePlanInputUseCase()
 
     @Test
-    fun invoke_returnsErrorsWhenRequiredFieldsMissing() {
+    fun invoke_returnsErrorsWhenRequiredFieldsMissingForAlbumTemplateMode() {
         val result = useCase(
             PlanInput(
                 name = "",
+                sourceType = PlanSourceType.ALBUM,
                 selectedAlbumId = null,
+                folderPath = "",
                 selectedServerId = null,
+                includeVideos = true,
+                useAlbumTemplating = true,
                 directoryTemplate = "",
                 filenamePattern = "",
             ),
@@ -29,14 +33,38 @@ class ValidatePlanInputUseCaseTest {
     }
 
     @Test
-    fun invoke_acceptsValidInput() {
+    fun invoke_requiresFolderPathForFolderPlans() {
+        val result = useCase(
+            PlanInput(
+                name = "General Files",
+                sourceType = PlanSourceType.FOLDER,
+                selectedAlbumId = null,
+                folderPath = "",
+                selectedServerId = 42L,
+                includeVideos = false,
+                useAlbumTemplating = false,
+                directoryTemplate = "",
+                filenamePattern = "",
+            ),
+        )
+
+        assertFalse(result.isValid)
+        assertTrue(result.folderPathError != null)
+    }
+
+    @Test
+    fun invoke_acceptsValidInputWithoutTemplating() {
         val result = useCase(
             PlanInput(
                 name = "Family Photos",
+                sourceType = PlanSourceType.ALBUM,
                 selectedAlbumId = "123",
+                folderPath = "",
                 selectedServerId = 42L,
-                directoryTemplate = "{year}/{month}",
-                filenamePattern = "{timestamp}_{mediaId}.{ext}",
+                includeVideos = true,
+                useAlbumTemplating = false,
+                directoryTemplate = "",
+                filenamePattern = "",
             ),
         )
 

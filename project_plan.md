@@ -135,6 +135,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Completed: runtime media permission handling is wired for Android 13+ (`READ_MEDIA_IMAGES`) and legacy devices (`READ_EXTERNAL_STORAGE`).
 - ✅ Completed: Plans list and editor now support create/edit/delete with name, enablement, album, server, template, and filename pattern fields.
 - ✅ Completed: first-plan defaults auto-select a camera-like album when available and seed default template/pattern values.
+- ✅ Scope extension: plan creation now supports both Photo Album plans and General Folder plans, with optional video inclusion and optional album templating controls.
 
 ---
 

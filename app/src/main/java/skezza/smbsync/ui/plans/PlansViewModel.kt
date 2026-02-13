@@ -19,6 +19,7 @@ import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.domain.media.ListMediaAlbumsUseCase
 import skezza.smbsync.domain.media.firstCameraAlbumOrNull
 import skezza.smbsync.domain.plan.PlanInput
+import skezza.smbsync.domain.plan.PlanSourceType
 import skezza.smbsync.domain.plan.PlanValidationResult
 import skezza.smbsync.domain.plan.ValidatePlanInputUseCase
 
@@ -50,12 +51,19 @@ class PlansViewModel(
     ) { plans, servers ->
         plans.map { plan ->
             val serverName = servers.firstOrNull { it.serverId == plan.serverId }?.name ?: "Unknown server"
+            val sourceType = parseSourceType(plan.sourceType)
+            val sourceSummary = if (sourceType == PlanSourceType.ALBUM) {
+                "Album (${plan.sourceAlbum})${if (plan.includeVideos) " + videos" else ""}"
+            } else {
+                "Folder (${plan.folderPath.ifBlank { "not set" }})"
+            }
             PlanListItemUiState(
                 planId = plan.planId,
                 name = plan.name,
-                album = plan.sourceAlbum,
+                sourceSummary = sourceSummary,
                 serverName = serverName,
                 enabled = plan.enabled,
+                useAlbumTemplating = plan.useAlbumTemplating,
                 template = plan.directoryTemplate,
                 filenamePattern = plan.filenamePattern,
             )
@@ -78,11 +86,7 @@ class PlansViewModel(
 
     fun setMediaPermissionGranted(granted: Boolean) {
         _hasMediaPermission.value = granted
-        if (granted) {
-            refreshAlbums()
-        } else {
-            _albums.value = emptyList()
-        }
+        if (granted) refreshAlbums() else _albums.value = emptyList()
     }
 
     fun refreshAlbums() {
@@ -115,8 +119,12 @@ class PlansViewModel(
                     editingPlanId = plan.planId,
                     name = plan.name,
                     enabled = plan.enabled,
-                    selectedAlbumId = plan.sourceAlbum,
+                    sourceType = parseSourceType(plan.sourceType),
+                    selectedAlbumId = plan.sourceAlbum.ifBlank { null },
+                    folderPath = plan.folderPath,
                     selectedServerId = plan.serverId,
+                    includeVideos = plan.includeVideos,
+                    useAlbumTemplating = plan.useAlbumTemplating,
                     directoryTemplate = plan.directoryTemplate,
                     filenamePattern = plan.filenamePattern,
                 )
@@ -128,8 +136,12 @@ class PlansViewModel(
 
     fun updateEditorName(value: String) { _editorState.value = _editorState.value.copy(name = value) }
     fun updateEditorEnabled(value: Boolean) { _editorState.value = _editorState.value.copy(enabled = value) }
+    fun updateEditorSourceType(value: PlanSourceType) { _editorState.value = _editorState.value.copy(sourceType = value) }
     fun updateEditorAlbum(value: String) { _editorState.value = _editorState.value.copy(selectedAlbumId = value) }
+    fun updateEditorFolderPath(value: String) { _editorState.value = _editorState.value.copy(folderPath = value) }
     fun updateEditorServer(value: Long) { _editorState.value = _editorState.value.copy(selectedServerId = value) }
+    fun updateEditorIncludeVideos(value: Boolean) { _editorState.value = _editorState.value.copy(includeVideos = value) }
+    fun updateEditorUseAlbumTemplating(value: Boolean) { _editorState.value = _editorState.value.copy(useAlbumTemplating = value) }
     fun updateEditorDirectoryTemplate(value: String) { _editorState.value = _editorState.value.copy(directoryTemplate = value) }
     fun updateEditorFilenamePattern(value: String) { _editorState.value = _editorState.value.copy(filenamePattern = value) }
 
@@ -139,8 +151,12 @@ class PlansViewModel(
             val validation = validatePlanInputUseCase(
                 PlanInput(
                     name = state.name,
+                    sourceType = state.sourceType,
                     selectedAlbumId = state.selectedAlbumId,
+                    folderPath = state.folderPath,
                     selectedServerId = state.selectedServerId,
+                    includeVideos = state.includeVideos,
+                    useAlbumTemplating = state.useAlbumTemplating,
                     directoryTemplate = state.directoryTemplate,
                     filenamePattern = state.filenamePattern,
                 ),
@@ -153,19 +169,19 @@ class PlansViewModel(
             val entity = PlanEntity(
                 planId = state.editingPlanId ?: 0,
                 name = state.name.trim(),
-                sourceAlbum = requireNotNull(state.selectedAlbumId),
+                sourceAlbum = if (state.sourceType == PlanSourceType.ALBUM) state.selectedAlbumId.orEmpty() else "",
+                sourceType = state.sourceType.name,
+                folderPath = if (state.sourceType == PlanSourceType.FOLDER) state.folderPath.trim() else "",
+                includeVideos = state.sourceType == PlanSourceType.ALBUM && state.includeVideos,
+                useAlbumTemplating = state.sourceType == PlanSourceType.ALBUM && state.useAlbumTemplating,
                 serverId = requireNotNull(state.selectedServerId),
-                directoryTemplate = state.directoryTemplate.trim(),
-                filenamePattern = state.filenamePattern.trim(),
+                directoryTemplate = if (state.sourceType == PlanSourceType.ALBUM && state.useAlbumTemplating) state.directoryTemplate.trim() else "",
+                filenamePattern = if (state.sourceType == PlanSourceType.ALBUM && state.useAlbumTemplating) state.filenamePattern.trim() else "",
                 enabled = state.enabled,
             )
 
             runCatching {
-                if (state.editingPlanId == null) {
-                    planRepository.createPlan(entity)
-                } else {
-                    planRepository.updatePlan(entity)
-                }
+                if (state.editingPlanId == null) planRepository.createPlan(entity) else planRepository.updatePlan(entity)
             }.onSuccess {
                 onSuccess()
             }.onFailure {
@@ -184,16 +200,21 @@ class PlansViewModel(
     private suspend fun maybeApplyFirstPlanDefaults(albums: List<MediaAlbum>) {
         val state = _editorState.value
         if (state.editingPlanId != null || state.name.isNotBlank()) return
-        val hasPlans = planRepository.observePlans().first().isNotEmpty()
-        if (hasPlans) return
+        if (planRepository.observePlans().first().isNotEmpty()) return
 
         val defaultAlbum = albums.firstCameraAlbumOrNull() ?: albums.firstOrNull()
         _editorState.value = state.copy(
+            sourceType = PlanSourceType.ALBUM,
             selectedAlbumId = defaultAlbum?.bucketId,
+            includeVideos = true,
+            useAlbumTemplating = false,
             directoryTemplate = if (state.directoryTemplate.isBlank()) "{year}/{month}" else state.directoryTemplate,
             filenamePattern = if (state.filenamePattern.isBlank()) "{timestamp}_{mediaId}.{ext}" else state.filenamePattern,
         )
     }
+
+    private fun parseSourceType(value: String): PlanSourceType =
+        PlanSourceType.entries.firstOrNull { it.name == value } ?: PlanSourceType.ALBUM
 
     companion object {
         fun factory(
@@ -204,11 +225,7 @@ class PlansViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(PlansViewModel::class.java)) {
                     @Suppress("UNCHECKED_CAST")
-                    return PlansViewModel(
-                        planRepository = planRepository,
-                        serverRepository = serverRepository,
-                        listMediaAlbumsUseCase = listMediaAlbumsUseCase,
-                    ) as T
+                    return PlansViewModel(planRepository, serverRepository, listMediaAlbumsUseCase) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }
@@ -221,9 +238,10 @@ class PlansViewModel(
 data class PlanListItemUiState(
     val planId: Long,
     val name: String,
-    val album: String,
+    val sourceSummary: String,
     val serverName: String,
     val enabled: Boolean,
+    val useAlbumTemplating: Boolean,
     val template: String,
     val filenamePattern: String,
 )
@@ -238,8 +256,12 @@ data class PlanEditorUiState(
     val editingPlanId: Long? = null,
     val name: String = "",
     val enabled: Boolean = true,
+    val sourceType: PlanSourceType = PlanSourceType.ALBUM,
     val selectedAlbumId: String? = null,
+    val folderPath: String = "",
     val selectedServerId: Long? = null,
+    val includeVideos: Boolean = false,
+    val useAlbumTemplating: Boolean = false,
     val directoryTemplate: String = "",
     val filenamePattern: String = "",
     val validation: PlanValidationResult = PlanValidationResult(),

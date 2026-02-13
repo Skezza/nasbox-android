@@ -17,6 +17,7 @@ SMBSync is an Android app focused on **manual, archive-only photo backup** from 
 - ✅ Phase 3 complete: SMB connection testing, error mapping, and Vault test actions are implemented.
 - ℹ️ Vault host input accepts either raw host (`quanta.local`) or SMB URI form (`smb://quanta.local/share`) for connection testing.
 - ✅ Phase 4 complete: MediaStore album integration, runtime photo permission flow, and full plan management are implemented.
+- ✨ Plans now support **Photo Album** and **General Folder** source types, optional video inclusion for album plans, and optional album templating.
 - ⏳ Next: Phase 5 core sync engine (manual-run, archive-only).
 
 See:
@@ -48,6 +49,8 @@ Vault also provides a **Discover servers** action that scans the current Wi-Fi s
 - Plan editor requests photo/media access only when needed to list device albums.
 - Android 13+ uses `READ_MEDIA_IMAGES`; Android 12 and below uses `READ_EXTERNAL_STORAGE`.
 - First-time plan creation auto-selects a camera-like album when one is available.
+- Album plans can include videos; folder plans can be chosen through system folder picker (document tree URI).
+- Album templating (directory/filename tokens) is optional and only shown when enabled for album plans.
 
 ## Running checks
 

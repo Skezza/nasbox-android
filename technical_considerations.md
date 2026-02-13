@@ -235,6 +235,8 @@ Each mapped error should provide:
 
 
 ## Phase 4 implementation notes
+- Plan source mode now supports either MediaStore album-backed plans or general folder-based plans, enabling broader “raw file” sync preparation workflows before phase-5 engine work.
+- Album plans now expose an include-videos option and make directory/filename templating explicitly optional (hidden when disabled).
 - Plan management is now implemented in Compose with a full Plans list and Plan editor flow (create/edit/delete and enabled toggle).
 - Media source integration now uses a dedicated `MediaStoreDataSource` abstraction to list albums and image items without leaking `ContentResolver` operations into UI/domain code.
 - Runtime media permission handling is implemented by Android SDK level (`READ_MEDIA_IMAGES` for Android 13+, `READ_EXTERNAL_STORAGE` for legacy versions) with clear blocked-state guidance in the plan editor.
