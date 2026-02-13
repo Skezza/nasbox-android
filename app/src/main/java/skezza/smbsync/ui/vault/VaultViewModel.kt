@@ -219,7 +219,7 @@ class VaultViewModel(
                     errorMessage = null,
                 )
                 if (servers.isEmpty()) {
-                    _message.value = "No SMB servers discovered from subnet scan. If your host resolves by mDNS, try entering smb://samba.local/<share> manually."
+                    _message.value = "No SMB servers discovered. On Android emulators, LAN/mDNS discovery is often blocked by NAT. Try on a physical device or enter smb://quanta.local/<share> manually."
                 }
             }.onFailure {
                 _discoveryState.value = _discoveryState.value.copy(
