@@ -32,7 +32,7 @@ See:
 
 ## SMB connection prerequisites
 
-Vault also provides a **Discover servers** action that scans the current Wi-Fi subnet for reachable SMB hosts and, when subnet probes find nothing, also checks common `.local` hostnames (including `samba.local`) before you fall back to manual entry.
+Vault also provides a **Discover servers** action that scans the current Wi-Fi subnet for reachable SMB hosts, enriches host naming via mDNS SMB service discovery when available, and checks common `.local` hostnames (including `samba.local` and `quanta.local`) before you fall back to manual entry.
 
 - App manifest must include `android.permission.INTERNET` for SMB socket connectivity.
 - `android.permission.ACCESS_NETWORK_STATE` is included so network availability diagnostics can be surfaced in UX improvements.

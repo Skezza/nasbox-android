@@ -6,6 +6,7 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 import java.util.Collections
+import javax.jmdns.JmDNS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -26,14 +27,35 @@ interface SmbServerDiscoveryScanner {
 class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
 
     override suspend fun discover(): List<DiscoveredSmbServer> = withContext(Dispatchers.IO) {
-        val subnetTargets = subnetTargets()
+        val local = localIPv4Address()
+        val subnetTargets = subnetTargets(local)
         val reachableByIp = scanTargets(subnetTargets)
+        val mdnsDiscovered = discoverViaMdns(local)
 
-        if (reachableByIp.isNotEmpty()) {
-            return@withContext reachableByIp
+        val merged = mergeDiscoveryResults(reachableByIp, mdnsDiscovered)
+        if (merged.isNotEmpty()) {
+            return@withContext merged
         }
 
         probeCommonLocalHostnames()
+    }
+
+    private fun mergeDiscoveryResults(
+        ipResults: List<DiscoveredSmbServer>,
+        mdnsResults: List<DiscoveredSmbServer>,
+    ): List<DiscoveredSmbServer> {
+        if (ipResults.isEmpty()) return mdnsResults.sortedBy { it.host }
+
+        val mdnsByIp = mdnsResults.associateBy { it.ipAddress }
+        return ipResults.map { server ->
+            val mdns = mdnsByIp[server.ipAddress]
+            if (mdns != null && (server.host == server.ipAddress || server.host.endsWith(".local", ignoreCase = true))) {
+                server.copy(host = mdns.host)
+            } else {
+                server
+            }
+        }.distinctBy { it.ipAddress }
+            .sortedBy { it.host }
     }
 
     private suspend fun scanTargets(targets: List<String>): List<DiscoveredSmbServer> {
@@ -60,8 +82,8 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
         }
     }
 
-    private fun subnetTargets(): List<String> {
-        val local = localIPv4Address() ?: return emptyList()
+    private fun subnetTargets(local: Inet4Address?): List<String> {
+        local ?: return emptyList()
         val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
         val ifaceAddress = interfaces
             .flatMap { networkInterface -> networkInterface.interfaceAddresses.orEmpty() }
@@ -70,8 +92,6 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
         val prefixLength = ifaceAddress?.networkPrefixLength?.toInt() ?: 24
         val normalizedPrefixLength = prefixLength.coerceIn(16, 30)
 
-        // Keep scans bounded for responsiveness; if subnet is larger than /24,
-        // scan the /24 block containing the local host.
         val effectivePrefixLength = maxOf(normalizedPrefixLength, 24)
         val mask = if (effectivePrefixLength == 32) -1 else -1 shl (32 - effectivePrefixLength)
 
@@ -98,6 +118,30 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
         return null
     }
 
+    private fun discoverViaMdns(local: Inet4Address?): List<DiscoveredSmbServer> {
+        local ?: return emptyList()
+        return runCatching {
+            JmDNS.create(local).use { jmDns ->
+                jmDns.list("_smb._tcp.local.", 1200)
+                    .flatMap { serviceInfo ->
+                        serviceInfo.hostAddresses.orEmpty().mapNotNull { ip ->
+                            val normalizedIp = ip.trim().removePrefix("/")
+                            if (normalizedIp.isBlank()) {
+                                null
+                            } else {
+                                val resolvedName = serviceInfo.name.ifBlank { normalizedIp }
+                                DiscoveredSmbServer(
+                                    host = if (resolvedName.endsWith(".local", ignoreCase = true)) resolvedName else "$resolvedName.local",
+                                    ipAddress = normalizedIp,
+                                )
+                            }
+                        }
+                    }
+            }
+        }.getOrDefault(emptyList())
+            .distinctBy { it.ipAddress }
+    }
+
     private suspend fun probeCommonLocalHostnames(): List<DiscoveredSmbServer> = coroutineScope {
         commonHostnameCandidates().map { host ->
             async {
@@ -115,6 +159,7 @@ class AndroidSmbServerDiscoveryScanner : SmbServerDiscoveryScanner {
             "fileserver.local",
             "storage.local",
             "homeserver.local",
+            "quanta.local",
         )
     }
 
