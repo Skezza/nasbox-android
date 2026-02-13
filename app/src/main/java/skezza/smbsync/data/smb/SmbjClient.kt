@@ -18,7 +18,7 @@ class SmbjClient : SmbClient {
                     connection.authenticate(authContext).use { session ->
                         if (request.shareName.isBlank()) {
                             // Root-level validation: auth + session establishment only.
-                            session.username
+                            Unit
                         } else {
                             session.connectShare(request.shareName).close()
                         }
