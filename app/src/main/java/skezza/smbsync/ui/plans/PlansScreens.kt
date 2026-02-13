@@ -334,17 +334,17 @@ private fun SourceTypeSelector(
         FilterChip(
             selected = selectedType == PlanSourceType.ALBUM,
             onClick = { onSelect(PlanSourceType.ALBUM) },
-            label = { Text("Photo Album Plan", maxLines = 1) },
+            label = { Text("Album", maxLines = 1) },
         )
         FilterChip(
             selected = selectedType == PlanSourceType.FOLDER,
             onClick = { onSelect(PlanSourceType.FOLDER) },
-            label = { Text("General Folder Plan", maxLines = 1) },
+            label = { Text("Folder", maxLines = 1) },
         )
         FilterChip(
             selected = selectedType == PlanSourceType.FULL_DEVICE,
             onClick = { onSelect(PlanSourceType.FULL_DEVICE) },
-            label = { Text("Full Phone Backup", maxLines = 1) },
+            label = { Text("Phone", maxLines = 1) },
         )
     }
 }
