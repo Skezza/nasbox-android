@@ -235,7 +235,7 @@ Each mapped error should provide:
 
 
 ## Phase 4 implementation notes
-- Plan source mode now supports MediaStore album-backed plans, general folder-based plans, and a full-device preset for copyable shared-storage roots, enabling broader “raw file” sync preparation workflows before phase-5 engine work.
+- Plan source mode now supports MediaStore album-backed plans, general folder-based plans, and a full-device preset for shared-storage roots, enabling broader “raw file” sync preparation workflows before phase-5 engine work.
 - Album plans now expose an include-videos option and make directory/filename templating explicitly optional (hidden when disabled), while full-device mode shows user guidance that backups can be long-running and battery-intensive.
 - Plan management is now implemented in Compose with a full Plans list and Plan editor flow (create/edit/delete and enabled toggle).
 - Media source integration now uses a dedicated `MediaStoreDataSource` abstraction to list albums and image items without leaking `ContentResolver` operations into UI/domain code.

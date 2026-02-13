@@ -266,7 +266,7 @@ fun PlanEditorScreen(
                                 Icon(Icons.Default.Info, contentDescription = null)
                                 Text("Full phone backup")
                             }
-                            Text("This plan will attempt to back up copyable shared-storage folders (for example DCIM, Pictures, Movies, Download, Documents, Music).")
+                            Text("This plan will attempt to back up shared-storage folders (for example DCIM, Pictures, Movies, Download, Documents, Music).")
                             Text("Heads up: this can take a long time and use plenty of battery. Best run overnight while charging.")
                         }
                     }

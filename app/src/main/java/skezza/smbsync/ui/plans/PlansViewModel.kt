@@ -55,7 +55,7 @@ class PlansViewModel(
             val sourceSummary = when (sourceType) {
                 PlanSourceType.ALBUM -> "Album (${plan.sourceAlbum})${if (plan.includeVideos) " + videos" else ""}"
                 PlanSourceType.FOLDER -> "Folder (${plan.folderPath.ifBlank { "not set" }})"
-                PlanSourceType.FULL_DEVICE -> "Full device backup (copyable storage)"
+                PlanSourceType.FULL_DEVICE -> "Full device backup (shared storage)"
             }
             PlanListItemUiState(
                 planId = plan.planId,
@@ -223,7 +223,7 @@ class PlansViewModel(
         PlanSourceType.entries.firstOrNull { it.name == value } ?: PlanSourceType.ALBUM
 
     companion object {
-        private const val FULL_DEVICE_PRESET = "FULL_DEVICE_COPYABLE_STORAGE"
+        private const val FULL_DEVICE_PRESET = "FULL_DEVICE_SHARED_STORAGE"
 
         fun factory(
             planRepository: PlanRepository,
