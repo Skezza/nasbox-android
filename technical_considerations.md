@@ -232,3 +232,11 @@ Each mapped error should provide:
 - SMB failures are normalized into MVP error taxonomy categories and surfaced as concise user-facing messages with recovery hints.
 - Server persistence now records test telemetry (`status`, `timestamp`, `latency`, and mapped error category/message) for vault health and upcoming dashboard status aggregation.
 - Room schema was incremented to version 2 with an explicit migration adding test metadata columns to `servers` to preserve upgrade compatibility.
+
+
+## Phase 4 implementation notes
+- Plan management is now implemented in Compose with a full Plans list and Plan editor flow (create/edit/delete and enabled toggle).
+- Media source integration now uses a dedicated `MediaStoreDataSource` abstraction to list albums and image items without leaking `ContentResolver` operations into UI/domain code.
+- Runtime media permission handling is implemented by Android SDK level (`READ_MEDIA_IMAGES` for Android 13+, `READ_EXTERNAL_STORAGE` for legacy versions) with clear blocked-state guidance in the plan editor.
+- Plan editor now validates required fields for name, source album, destination server, directory template, and filename pattern before persistence.
+- First-plan UX defaults are applied when no plans exist by auto-selecting a camera-like album (when present) and seeding default template/pattern values.
