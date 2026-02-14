@@ -36,7 +36,7 @@ class SmbjClient : SmbClient {
                 val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
                 connection.authenticate(authContext).use { session ->
                     if (request.shareName.isBlank()) {
-                        val shares = session.listShares().sorted()
+                        val shares = readAvailableShares(session).sorted()
                         return@withContext SmbBrowseResult(
                             shareName = "",
                             directoryPath = "",
@@ -96,6 +96,21 @@ private fun joinPath(basePath: String, segment: String): String {
         return basePath
     }
     return "$basePath/$normalizedSegment"
+}
+
+
+private fun readAvailableShares(session: Any): List<String> {
+    return runCatching {
+        val method = session::class.java.methods.firstOrNull {
+            it.name == "listShares" && it.parameterCount == 0
+        } ?: return emptyList()
+
+        @Suppress("UNCHECKED_CAST")
+        when (val raw = method.invoke(session)) {
+            is Collection<*> -> raw.filterIsInstance<String>()
+            else -> emptyList()
+        }
+    }.getOrDefault(emptyList())
 }
 
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {

@@ -2,6 +2,7 @@ package skezza.smbsync.domain.smb
 
 import skezza.smbsync.data.smb.SmbBrowseRequest
 import skezza.smbsync.data.smb.SmbClient
+import skezza.smbsync.data.smb.SmbConnectionFailure
 import skezza.smbsync.data.smb.toSmbConnectionFailure
 
 class BrowseSmbPathUseCase(
@@ -45,7 +46,7 @@ class BrowseSmbPathUseCase(
                 )
             },
             onFailure = { throwable ->
-                val mapped = throwable.toSmbConnectionFailure().toUiError()
+                val mapped = throwable.toSmbConnectionFailure().toBrowseUiError()
                 SmbBrowseUiResult(
                     success = false,
                     message = mapped.message,
@@ -67,3 +68,40 @@ data class SmbBrowseUiResult(
     val recoveryHint: String? = null,
     val technicalDetail: String? = null,
 )
+
+private data class BrowseMappedSmbError(
+    val message: String,
+    val recoveryHint: String,
+)
+
+private fun SmbConnectionFailure.toBrowseUiError(): BrowseMappedSmbError = when (this) {
+    is SmbConnectionFailure.HostUnreachable -> BrowseMappedSmbError(
+        message = "Unable to reach the host.",
+        recoveryHint = "Check host name/IP and network connectivity.",
+    )
+
+    is SmbConnectionFailure.AuthenticationFailed -> BrowseMappedSmbError(
+        message = "Authentication failed.",
+        recoveryHint = "Verify username and password.",
+    )
+
+    is SmbConnectionFailure.ShareNotFound -> BrowseMappedSmbError(
+        message = "SMB share not found.",
+        recoveryHint = "Check the configured share name.",
+    )
+
+    is SmbConnectionFailure.RemotePermissionDenied -> BrowseMappedSmbError(
+        message = "Remote permission denied.",
+        recoveryHint = "Ensure the account has permission to access the share.",
+    )
+
+    is SmbConnectionFailure.Timeout, is SmbConnectionFailure.NetworkInterruption -> BrowseMappedSmbError(
+        message = "Connection timed out or was interrupted.",
+        recoveryHint = "Retry on a stable network and validate SMB server availability.",
+    )
+
+    is SmbConnectionFailure.Unknown -> BrowseMappedSmbError(
+        message = "Unable to browse SMB path.",
+        recoveryHint = "Review server details and try again.",
+    )
+}
