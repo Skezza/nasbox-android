@@ -209,8 +209,9 @@ class PlansViewModel(
                 .onSuccess { result ->
                     _message.value = "Run ${result.status.lowercase()} · uploaded ${result.uploadedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}"
                 }
-                .onFailure {
-                    _message.value = "Run failed to start. Please verify plan and server configuration."
+                .onFailure { error ->
+                    val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName.orEmpty()
+                    _message.value = "Run could not start: $detail"
                 }
             _activeRunPlanIds.value = _activeRunPlanIds.value - planId
         }
