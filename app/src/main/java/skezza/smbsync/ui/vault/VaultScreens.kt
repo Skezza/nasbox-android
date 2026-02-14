@@ -251,6 +251,14 @@ fun ServerEditorScreen(
             ServerField("Base path", state.basePath, state.validation.basePathError) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
+            ElevatedButton(
+                onClick = viewModel::openBrowseDestination,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.TravelExplore, contentDescription = null)
+                Text("Browse share & folder", modifier = Modifier.padding(start = 8.dp))
+            }
+            Text("Tip: browse helps prefill Share and Base path from the server.")
             ServerField("Username", state.username, state.validation.usernameError) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
@@ -272,9 +280,6 @@ fun ServerEditorScreen(
                     enabled = !state.isTestingConnection,
                 ) {
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
-                }
-                ElevatedButton(onClick = viewModel::openBrowseDestination) {
-                    Text("Browse destination")
                 }
             }
         }
