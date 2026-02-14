@@ -16,9 +16,11 @@ SMBSync is an Android app focused on **manual, archive-only photo backup** from 
 - ✅ Phase 2 complete: credential security and Vault management are implemented.
 - ✅ Phase 3 complete: SMB connection testing, error mapping, and Vault test actions are implemented.
 - ℹ️ Vault host input accepts either raw host (`quanta.local`) or SMB URI form (`smb://quanta.local/share`) for connection testing.
+- ℹ️ The server editor now exposes an optional Domain/Workgroup field (e.g., `WORKGROUP`) used for SMB authentication during share browse enumeration.
 - ✅ Phase 4 complete: MediaStore album integration, runtime photo permission flow, and full plan management are implemented.
 - ✨ Plans now support **Photo Album** and **General Folder** source types, optional video inclusion for album plans, optional album templating, and a full-phone backup preset for shared storage.
 - ✅ Phase 5 complete: core sync engine is implemented with run records, item-level continue-on-error handling, SMB uploads, and backup-proof persistence.
+- ✅ Phase 5.5.1 complete: share discovery now uses SMBJ RPC (`IPC$` + SRVSVC `NetShareEnum`) first, then falls back to SMBJ `listShares` when RPC returns no data.
 - ⏳ Next: Phase 5.5 source-execution expansion for Folder and Full-Device plans, followed by Phase 6 dashboard mission control.
 
 See:
@@ -42,6 +44,7 @@ Vault also provides a **Discover servers** action that scans the current Wi-Fi s
 - `android.permission.CHANGE_WIFI_MULTICAST_STATE` is used so mDNS discovery can acquire multicast lock reliably on Android devices.
 - For mDNS hosts like `quanta.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
 - Discovery reliability is lower on Android emulators because guest networking (NAT) may block broadcast/mDNS/LAN reachability; prefer testing discovery on a physical device.
+- Share enumeration within **Browse destination** now runs two SMB2/3-compatible paths: first SRVSVC `NetShareEnum` over SMBJ RPC (`IPC$`), then SMBJ `listShares` when RPC yields no data.
 
 
 ## Manual run behavior (Phase 5)
@@ -70,6 +73,9 @@ From repository root:
 ```bash
 ./gradlew test
 ```
+
+Known limitation:
+- Some JVM unit tests currently depend on Android framework APIs (for example `android.util.Log` and Room Android wiring), so `:app:testDebugUnitTest` can fail locally without Robolectric/instrumentation coverage.
 
 ## Testing direction (MVP)
 

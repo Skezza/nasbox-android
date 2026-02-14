@@ -3,15 +3,15 @@
 This plan sequences delivery into reviewable phases while keeping the app functional after every phase.
 
 ## Delivery principles
-## Current execution status
+-## Current execution status
 - ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
 - ✅ Phase 1 — Persistence foundation: **Completed**.
 - ✅ Phase 2 — Credential security and Vault management: **Completed**.
 - ✅ Phase 3 — SMB connectivity and test flow: **Completed**.
 - ✅ Phase 4 — Media source integration and Plan management: **Completed**.
+- 🧭 Phase 4.5 — Guided SMB destination browse assist: **Proposed**.
 - ✅ Phase 5 — Core sync engine (manual-run, archive-only): **Completed**.
 - ⏳ Phase 5.5 — Source expansion execution (folder + full-device): **Planned**.
-
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
 - Validate phase exit criteria before advancing.
@@ -141,6 +141,47 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ---
 
+## Phase 4.5 — Guided SMB destination browse assist (new)
+
+### Why this exists
+- Users can discover hosts and test credentials today, but they still have to manually guess the share and base path.
+- We want a playful, low-friction “network browser” experience that helps users prefill destination inputs without introducing a full file-manager workflow.
+
+### Goals
+- Add an SMB-aware browse assistant inside **Add/Edit Server** so users can:
+  - see available shares after authentication,
+  - open one share,
+  - drill into a few directory levels,
+  - quickly set share + base path from a selected folder.
+- Keep scope intentionally shallow and fast: this is a destination picker, not a file explorer.
+
+### Work
+- Extend `SmbClient` abstraction with browse-focused read operations:
+  - `listShares(host, username, password)`
+  - `listDirectories(host, share, path, username, password)`
+- Add `BrowseSmbDestinationUseCase` to orchestrate:
+  - connectivity + auth checks,
+  - capability/error mapping (auth failure vs share denied vs timeout),
+  - sorting and filtering (folders first, hide noisy system entries by default).
+- Add server-editor UI components:
+  - **Browse** button near Share/Base path inputs,
+  - bottom sheet / dialog with two tabs:
+    - **Shares** (top-level list)
+    - **Folders** (selected share path trail + child folders)
+  - one-tap **Use this location** action that prefills Share + Base path fields.
+- Add “smart helper” UX details:
+  - breadcrumb chips (`/`, `photos`, `archive`),
+  - “common backup folders” hints (`backup`, `photos`, `camera upload`) when no clear match,
+  - fast re-open with recent browse cache per host to reduce repeat latency.
+
+### Exit criteria
+- From Add Server, user can authenticate and browse share/folder structure at surface depth.
+- Selecting a folder updates Share + Base path fields with normalized values.
+- Errors are clear and recoverable; user can still manually input values if browse fails.
+- Unit tests cover path normalization, breadcrumb navigation state, and error mapping.
+
+---
+
 ## Phase 5 — Core sync engine (manual-run, archive-only)
 
 ### Goals
@@ -169,6 +210,28 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Completed: per-run logs and summary errors are persisted for diagnostics, including start/scan/finish lifecycle events and item-level failure messages.
 - ✅ Completed: Plans list now includes a manual **Run now** action per plan so users can trigger MVP runs without waiting for the dashboard mission-control phase.
 - ⚠️ Scoped limitation: Phase-5 execution currently supports album-based plans; folder/full-device sources are rejected with explicit failed-run summaries until a later phase extends source scanning.
+
+---
+
+## Phase 5.5.1 — Share discovery fallback
+
+### Goals
+- Deliver a browse assistant that uses SMB2/3-compatible SRVSVC `NetShareEnum` over SMBJ RPC before any secondary fallback path.
+- Keep the Vault “Browse destination” flow fast and predictable while expanding the set of hosts that can prefill share + base path inputs automatically.
+
+### Work
+- Add a `SmbShareRpcEnumerator` data-layer contract implemented with SMBJ RPC (`IPC$` + SRVSVC `NetShareEnum`) and domain-aware authentication.
+- Update `BrowseSmbDestinationUseCase.listShares` to try RPC first, then call `SmbClient.listShares` only when RPC returns empty or throws, merging/deduplicating both lists before reporting success.
+- Wire `AppContainer` to provide the RPC enumerator so existing callers remain unchanged, and keep the server editor UI sheet behavioral surface untouched.
+- Expand domain tests to cover RPC-first success, fallback success, and combined failure messaging while retaining the existing “Connected, but no shares were returned” empty-state hint when no path yields names.
+
+### Exit criteria
+- Browse destination now surfaces valid share names whenever either SRVSVC RPC enumeration or SMBJ `listShares` succeeds.
+- Sorting/deduplication stays consistent, and users still see the familiar empty-state message when no shares are available.
+- Regression tests cover RPC-first behavior, fallback flow, and failure handoff so the message stays stable.
+
+### Implementation status
+- ✅ Completed: documentation, DI wiring, and tests now describe and verify the fallback behavior.
 
 ---
 

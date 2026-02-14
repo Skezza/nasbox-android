@@ -229,6 +229,7 @@ Each mapped error should provide:
 - Host normalization accepts either plain host input or URI-style values such as `smb://host/share`, including share extraction when provided in host field.
 - Vault includes optional SMB discovery on the local network (port 445 probing on local subnet with mDNS service lookups (`_smb`, `_workstation`, `_device-info`) plus NetBIOS node-status lookups for host-name enrichment (with Android multicast lock during mDNS scanning) and merged common `.local` fallback probes that can replace IP-only discovery labels) to assist server setup; discovered hosts are advisory and still require credential validation.
 - Share/root folder browsing over SMB is intentionally deferred beyond current MVP Phase 3 UX scope despite discovery enhancements.
+- Phase 5.5.1 introduces SMBJ RPC share enumeration (`IPC$` + SRVSVC `NetShareEnum`) as the primary browse path, with SMBJ `listShares` as a secondary fallback when RPC returns empty.
 - SMB failures are normalized into MVP error taxonomy categories and surfaced as concise user-facing messages with recovery hints.
 - Server persistence now records test telemetry (`status`, `timestamp`, `latency`, and mapped error category/message) for vault health and upcoming dashboard status aggregation.
 - Room schema was incremented to version 2 with an explicit migration adding test metadata columns to `servers` to preserve upgrade compatibility.
@@ -242,6 +243,66 @@ Each mapped error should provide:
 - Runtime media permission handling is implemented by Android SDK level (`READ_MEDIA_IMAGES` for Android 13+, `READ_EXTERNAL_STORAGE` for legacy versions) with clear blocked-state guidance in the plan editor.
 - Plan editor now validates required fields for name, source album, destination server, directory template, and filename pattern before persistence.
 - First-plan UX defaults are applied when no plans exist by auto-selecting a camera-like album (when present) and seeding default template/pattern values.
+
+## Proposed design extension: Guided SMB Browse Assist (Server setup UX)
+
+### Product intent
+- During server creation/editing, users should be able to “look around” the SMB destination at a high level, then prefill **share** and **base path** inputs confidently.
+- This is intentionally **not** a general-purpose file manager. It is a setup assistant that reduces typing and configuration mistakes.
+
+### UX interaction model
+- Add a **Browse destination** action in Server Editor next to Share/Base path fields.
+- Opening browse launches a lightweight guided flow:
+  1. **Authenticate** using current editor fields (host/user/password).
+  2. **Select share** from discovered accessible shares.
+  3. **Select folder** by browsing directories only (no files, no upload/download actions).
+  4. **Apply selection** to Share + Base path and return to editor.
+- Interaction should stay quick and playful:
+  - breadcrumb trail for backtracking,
+  - obvious “Use this folder” CTA,
+  - friendly empty-state suggestions (e.g., suggest `backup` when root is empty).
+
+### Domain and data boundaries
+- Keep browse behavior in domain use cases to avoid protocol details in UI.
+- Proposed domain surfaces:
+  - `ListSmbSharesUseCase`
+  - `ListSmbDirectoriesUseCase`
+  - or a combined `BrowseSmbDestinationUseCase` with stateful navigation helpers.
+- Proposed data-model payloads:
+  - `SmbShareCandidate(name, isWritable?, note?)`
+  - `SmbDirectoryNode(path, displayName, depth, isSelectable)`
+  - `SmbBrowseSnapshot(host, share, currentPath, directories, breadcrumb)`
+
+### SMB adapter evolution
+- Extend `SmbClient` abstraction with browse-only operations:
+  - list shares for authenticated session,
+  - list immediate child directories for a share-relative path.
+- Preserve existing error taxonomy mapping so browse failures share language with connection testing:
+  - auth failure,
+  - host unreachable,
+  - share not found/inaccessible,
+  - permission denied,
+  - timeout.
+
+### Guardrails (important)
+- Directory listing depth should be intentionally capped for responsiveness (for example, no recursive tree walk).
+- Do not expose file-level operations in this flow.
+- Keep manual override: user can always type share/base path even when browse is unavailable.
+- Cache last successful browse snapshot per host for short-lived UX acceleration, but avoid persistent sensitive metadata.
+
+### Validation and normalization rules
+- On apply:
+  - share value is trimmed and slash-normalized,
+  - base path is normalized to share-relative segments,
+  - leading/trailing separator noise is removed.
+- Reuse existing input validation rules after prefill so editor still enforces canonical server constraints.
+
+### Suggested implementation sequence
+1. Add SMB browse methods to `SmbClient` + `SmbjClient`.
+2. Add domain browse use case with mapped errors and normalized outputs.
+3. Add `VaultViewModel` browse state (`isBrowsing`, current share/path, nodes, errors).
+4. Add Server Editor browse sheet/dialog and prefill action.
+5. Add unit tests for path normalization, breadcrumb navigation, and error mapping.
 
 ## Phase 5 implementation notes
 - Core backup orchestration is now implemented via `RunPlanBackupUseCase`, which creates a `RUNNING` entry, scans source media, applies backup-record skip logic, uploads new files, persists proof records, and finalizes run status/counters.

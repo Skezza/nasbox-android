@@ -25,6 +25,7 @@ class TestSmbConnectionUseCaseTest {
                 host = "host",
                 shareName = "share",
                 basePath = "base",
+                domain = "",
                 username = "user",
                 credentialAlias = "alias",
             ),
@@ -55,6 +56,7 @@ class TestSmbConnectionUseCaseTest {
                 host = "smb://host/share",
                 shareName = "",
                 basePath = "base",
+                domain = "",
                 username = "user",
                 credentialAlias = "alias",
             ),
@@ -82,6 +84,16 @@ class TestSmbConnectionUseCaseTest {
             error?.let { throw it }
             return checkNotNull(result)
         }
+
+        override suspend fun listShares(host: String, username: String, password: String): List<String> = emptyList()
+
+        override suspend fun listDirectories(
+            host: String,
+            shareName: String,
+            path: String,
+            username: String,
+            password: String,
+        ): List<String> = emptyList()
     }
 
     private class FakeServerRepository(

@@ -1,5 +1,6 @@
 package skezza.smbsync.ui.vault
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -17,6 +18,8 @@ import skezza.smbsync.data.discovery.DiscoveredSmbServer
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbDestinationUseCase
+import skezza.smbsync.domain.smb.SmbBrowseResult
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 import skezza.smbsync.domain.vault.ServerInput
 import skezza.smbsync.domain.vault.ServerValidationResult
@@ -27,11 +30,13 @@ class VaultViewModel(
     private val credentialStore: CredentialStore,
     private val testSmbConnectionUseCase: TestSmbConnectionUseCase,
     private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+    private val browseSmbDestinationUseCase: BrowseSmbDestinationUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
 ) : ViewModel() {
 
     private val testingServerIds = MutableStateFlow<Set<Long>>(emptySet())
     private var pendingDiscoverySelection: DiscoveredSmbServer? = null
+    private var pendingAutoBrowse: Boolean = false
 
     val servers: StateFlow<List<ServerListItemUiState>> = serverRepository.observeServers()
         .combine(testingServerIds) { servers, testing ->
@@ -60,6 +65,9 @@ class VaultViewModel(
     private val _discoveryState = MutableStateFlow(DiscoveryUiState())
     val discoveryState: StateFlow<DiscoveryUiState> = _discoveryState.asStateFlow()
 
+    private val _browseState = MutableStateFlow(SmbBrowseUiState())
+    val browseState: StateFlow<SmbBrowseUiState> = _browseState.asStateFlow()
+
     fun clearMessage() {
         _message.value = null
     }
@@ -68,15 +76,22 @@ class VaultViewModel(
         if (serverId == null) {
             val discovery = pendingDiscoverySelection
             pendingDiscoverySelection = null
-            _editorState.value = if (discovery == null) {
+            val nextState = if (discovery == null) {
                 ServerEditorUiState()
             } else {
+                val normalizedHost = discovery.host.trim().ifBlank { discovery.ipAddress }.lowercase()
                 ServerEditorUiState(
-                    name = discovery.host,
+                    name = normalizedHost,
                     host = discovery.ipAddress,
                     shareName = "",
                     basePath = "backup",
+                    domain = "",
                 )
+            }
+            _editorState.value = nextState
+            if (pendingAutoBrowse) {
+                pendingAutoBrowse = false
+                openBrowseDestination()
             }
             clearMessage()
             return
@@ -93,6 +108,7 @@ class VaultViewModel(
                     host = server.host,
                     shareName = server.shareName,
                     basePath = server.basePath,
+                    domain = server.domain,
                     username = server.username,
                     password = existingPassword,
                     validation = ServerValidationResult(),
@@ -105,7 +121,12 @@ class VaultViewModel(
     }
 
     fun updateEditorField(field: ServerEditorField, value: String) {
-        _editorState.value = _editorState.value.updateField(field, value)
+        val updated = _editorState.value.updateField(field, value)
+        _editorState.value = updated
+        if (pendingAutoBrowse && updated.host.isNotBlank() && updated.username.isNotBlank() && updated.password.isNotBlank()) {
+            pendingAutoBrowse = false
+            openBrowseDestination()
+        }
     }
 
     fun saveServer(onSuccess: () -> Unit) {
@@ -140,6 +161,7 @@ class VaultViewModel(
                     host = state.host.trim(),
                     shareName = normalizeShare(state.shareName),
                     basePath = state.basePath.trim(),
+                    domain = state.domain.trim(),
                     username = state.username.trim(),
                     credentialAlias = credentialAlias,
                 )
@@ -207,6 +229,199 @@ class VaultViewModel(
         }
     }
 
+    fun openBrowseDestination() {
+        val editor = _editorState.value
+        if (editor.host.isBlank()) {
+            _message.value = "Enter host before browsing destination."
+            return
+        }
+        val normalizedShare = normalizeShare(editor.shareName)
+        val normalizedBasePath = browseSmbDestinationUseCase.normalizePath(editor.basePath)
+        if (editor.username.isBlank() || editor.password.isBlank()) {
+            viewModelScope.launch {
+                when (val result = browseSmbDestinationUseCase.listShares(editor.host, "", "", editor.domain.trim())) {
+                    is SmbBrowseResult.Success -> {
+                        if (result.data.isNotEmpty()) {
+                            _browseState.value = SmbBrowseUiState(
+                                isVisible = true,
+                                isLoading = false,
+                                mode = BrowseMode.SHARES,
+                                shares = result.data,
+                                selectedShare = "",
+                                currentPath = "",
+                                errorMessage = null,
+                            )
+                        } else {
+                            _message.value = "Guest access returned no shares. Enter credentials to browse."
+                        }
+                    }
+
+                    is SmbBrowseResult.Failure -> {
+                        Log.w(
+                            TAG,
+                            "openBrowseDestination guestFailure host=${editor.host.trim()} message=${result.message} detail=${result.technicalDetail}",
+                        )
+                        _message.value = "Guest access failed. Enter credentials to browse."
+                    }
+                }
+            }
+            return
+        }
+
+        _browseState.value = SmbBrowseUiState(
+            isVisible = true,
+            isLoading = true,
+            selectedShare = normalizedShare,
+            currentPath = normalizedBasePath,
+        )
+
+        viewModelScope.launch {
+            if (normalizedShare.isBlank()) {
+                loadBrowseShares()
+            } else {
+                loadBrowseDirectories(normalizedShare, normalizedBasePath)
+            }
+        }
+    }
+
+    fun closeBrowseDestination() {
+        _browseState.value = SmbBrowseUiState()
+    }
+
+    fun refreshBrowseDestination() {
+        val current = _browseState.value
+        if (!current.isVisible) return
+        viewModelScope.launch {
+            if (current.selectedShare.isBlank()) {
+                loadBrowseShares()
+            } else {
+                loadBrowseDirectories(current.selectedShare, current.currentPath)
+            }
+        }
+    }
+
+    fun selectBrowseShare(shareName: String) {
+        viewModelScope.launch {
+            loadBrowseDirectories(shareName, "")
+        }
+    }
+
+    fun openBrowseDirectory(directoryName: String) {
+        val state = _browseState.value
+        if (state.selectedShare.isBlank()) return
+        val nextPath = if (state.currentPath.isBlank()) directoryName else "${state.currentPath}/$directoryName"
+        viewModelScope.launch {
+            loadBrowseDirectories(state.selectedShare, nextPath)
+        }
+    }
+
+    fun navigateBrowseBreadcrumb(index: Int) {
+        val state = _browseState.value
+        if (state.selectedShare.isBlank()) return
+        val normalized = browseSmbDestinationUseCase.normalizePath(state.currentPath)
+        val segments = normalized.split('/').filter { it.isNotBlank() }
+        val nextPath = when {
+            index < 0 -> null // jump back to share list
+            index <= 0 -> ""
+            index - 1 < segments.size -> segments.take(index).joinToString("/")
+            else -> normalized
+        }
+        viewModelScope.launch {
+            if (nextPath == null) {
+                _browseState.value = _browseState.value.copy(
+                    mode = BrowseMode.SHARES,
+                    selectedShare = "",
+                    currentPath = "",
+                    directories = emptyList(),
+                    errorMessage = null,
+                )
+                loadBrowseShares()
+            } else {
+                loadBrowseDirectories(state.selectedShare, nextPath)
+            }
+        }
+    }
+
+    fun applyBrowseSelection() {
+        val state = _browseState.value
+        if (state.selectedShare.isBlank()) {
+            _message.value = "Select a share to apply destination."
+            return
+        }
+        _editorState.value = _editorState.value.copy(
+            shareName = normalizeShare(state.selectedShare),
+            basePath = browseSmbDestinationUseCase.normalizePath(state.currentPath),
+        )
+        _browseState.value = SmbBrowseUiState()
+        _message.value = "Destination prefilled from SMB browse."
+    }
+
+    private suspend fun loadBrowseShares() {
+        val editor = _editorState.value
+        _browseState.value = _browseState.value.copy(isLoading = true, errorMessage = null)
+            when (val result = browseSmbDestinationUseCase.listShares(editor.host, editor.username, editor.password, editor.domain.trim())) {
+            is SmbBrowseResult.Success -> {
+                _browseState.value = _browseState.value.copy(
+                    isLoading = false,
+                    mode = BrowseMode.SHARES,
+                    shares = result.data,
+                    directories = emptyList(),
+                    errorMessage = if (result.data.isEmpty()) {
+                        "Connected, but no shares were returned. Check permissions and hidden share visibility."
+                    } else {
+                        null
+                    },
+                )
+            }
+
+            is SmbBrowseResult.Failure -> {
+                Log.w(TAG, "loadBrowseShares failure host=${editor.host.trim()} message=${result.message} detail=${result.technicalDetail}")
+                _browseState.value = _browseState.value.copy(isLoading = false, errorMessage = joinBrowseMessage(result))
+            }
+        }
+    }
+
+    private suspend fun loadBrowseDirectories(shareName: String, path: String) {
+        val editor = _editorState.value
+        val normalizedShare = normalizeShare(shareName)
+        val normalizedPath = browseSmbDestinationUseCase.normalizePath(path)
+        _browseState.value = _browseState.value.copy(
+            isLoading = true,
+            mode = BrowseMode.FOLDERS,
+            selectedShare = normalizedShare,
+            currentPath = normalizedPath,
+            errorMessage = null,
+        )
+        when (
+            val result = browseSmbDestinationUseCase.listDirectories(
+                host = editor.host,
+                shareName = normalizedShare,
+                path = normalizedPath,
+                username = editor.username,
+                password = editor.password,
+            )
+        ) {
+            is SmbBrowseResult.Success -> {
+                _browseState.value = _browseState.value.copy(
+                    isLoading = false,
+                    mode = BrowseMode.FOLDERS,
+                    selectedShare = normalizedShare,
+                    currentPath = normalizedPath,
+                    directories = result.data,
+                    errorMessage = if (result.data.isEmpty()) "No folders found in this location." else null,
+                )
+            }
+
+            is SmbBrowseResult.Failure -> {
+                Log.w(TAG, "loadBrowseDirectories failure host=${editor.host.trim()} share=$normalizedShare path=$normalizedPath message=${result.message} detail=${result.technicalDetail}")
+                _browseState.value = _browseState.value.copy(isLoading = false, errorMessage = joinBrowseMessage(result))
+            }
+        }
+    }
+
+    private fun joinBrowseMessage(result: SmbBrowseResult.Failure): String =
+        listOfNotNull(result.message, result.recoveryHint, result.technicalDetail).joinToString(" ")
+
     fun discoverServers() {
         viewModelScope.launch {
             _discoveryState.value = _discoveryState.value.copy(isScanning = true, errorMessage = null)
@@ -232,6 +447,7 @@ class VaultViewModel(
 
     fun setDiscoverySelection(server: DiscoveredSmbServer) {
         pendingDiscoverySelection = server
+        pendingAutoBrowse = true
     }
 
     fun clearDiscoveryState() {
@@ -258,11 +474,14 @@ class VaultViewModel(
         if (shareName.isBlank()) host else "$host/$shareName"
 
     companion object {
+        private const val TAG = "SMBSyncBrowse"
+
         fun factory(
             serverRepository: ServerRepository,
             credentialStore: CredentialStore,
             testSmbConnectionUseCase: TestSmbConnectionUseCase,
             discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+            browseSmbDestinationUseCase: BrowseSmbDestinationUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(VaultViewModel::class.java)) {
@@ -272,6 +491,7 @@ class VaultViewModel(
                         credentialStore = credentialStore,
                         testSmbConnectionUseCase = testSmbConnectionUseCase,
                         discoverSmbServersUseCase = discoverSmbServersUseCase,
+                        browseSmbDestinationUseCase = browseSmbDestinationUseCase,
                     ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
@@ -289,8 +509,14 @@ enum class ServerEditorField {
     HOST,
     SHARE,
     BASE_PATH,
+    DOMAIN,
     USERNAME,
     PASSWORD,
+}
+
+enum class BrowseMode {
+    SHARES,
+    FOLDERS,
 }
 
 data class ServerListItemUiState(
@@ -311,6 +537,7 @@ data class ServerEditorUiState(
     val host: String = "",
     val shareName: String = "",
     val basePath: String = "",
+    val domain: String = "",
     val username: String = "",
     val password: String = "",
     val validation: ServerValidationResult = ServerValidationResult(),
@@ -322,6 +549,7 @@ data class ServerEditorUiState(
             ServerEditorField.HOST -> copy(host = value)
             ServerEditorField.SHARE -> copy(shareName = value)
             ServerEditorField.BASE_PATH -> copy(basePath = value)
+            ServerEditorField.DOMAIN -> copy(domain = value)
             ServerEditorField.USERNAME -> copy(username = value)
             ServerEditorField.PASSWORD -> copy(password = value)
         }
@@ -333,3 +561,17 @@ data class DiscoveryUiState(
     val servers: List<DiscoveredSmbServer> = emptyList(),
     val errorMessage: String? = null,
 )
+
+data class SmbBrowseUiState(
+    val isVisible: Boolean = false,
+    val isLoading: Boolean = false,
+    val mode: BrowseMode = BrowseMode.SHARES,
+    val shares: List<String> = emptyList(),
+    val selectedShare: String = "",
+    val currentPath: String = "",
+    val directories: List<String> = emptyList(),
+    val errorMessage: String? = null,
+) {
+    val breadcrumbs: List<String>
+        get() = listOf("") + currentPath.split('/').filter { it.isNotBlank() }
+}

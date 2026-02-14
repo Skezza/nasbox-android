@@ -1,13 +1,18 @@
 package skezza.smbsync.ui.vault
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +37,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,8 +46,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,20 +75,28 @@ fun VaultScreen(
         viewModel.clearMessage()
     }
 
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
+                expandedHeight = 56.dp,
                 title = { Text("Vault") },
                 actions = {
-                    IconButton(onClick = {
-                        showDiscoveryDialog = true
-                        viewModel.discoverServers()
-                    }) {
-                        Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
-                    }
-                    IconButton(onClick = onAddServer) {
+                    IconButton(
+                        modifier = Modifier.size(52.dp),
+                        onClick = onAddServer,
+                    ) {
                         Icon(Icons.Default.Add, contentDescription = "Add server")
+                    }
+                    IconButton(
+                        modifier = Modifier.size(52.dp),
+                        onClick = {
+                            showDiscoveryDialog = true
+                            viewModel.discoverServers()
+                        },
+                    ) {
+                        Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
                     }
                 },
             )
@@ -179,6 +198,7 @@ fun ServerEditorScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.editorState.collectAsState()
+    val browseState by viewModel.browseState.collectAsState()
     val message by viewModel.message.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -190,6 +210,18 @@ fun ServerEditorScreen(
         val text = message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(text)
         viewModel.clearMessage()
+    }
+
+    if (browseState.isVisible) {
+        BrowseDestinationDialog(
+            state = browseState,
+            onDismiss = viewModel::closeBrowseDestination,
+            onRefresh = viewModel::refreshBrowseDestination,
+            onSelectShare = viewModel::selectBrowseShare,
+            onOpenDirectory = viewModel::openBrowseDirectory,
+            onNavigateBreadcrumb = viewModel::navigateBrowseBreadcrumb,
+            onUseLocation = viewModel::applyBrowseSelection,
+        )
     }
 
     Scaffold(
@@ -236,6 +268,22 @@ fun ServerEditorScreen(
             }
             ServerField("Base path", state.basePath, state.validation.basePathError) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
+            }
+            ElevatedButton(
+                onClick = viewModel::openBrowseDestination,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.TravelExplore, contentDescription = null)
+                Text("Browse share & folder", modifier = Modifier.padding(start = 8.dp))
+            }
+            Text("Tip: browse helps prefill Share and Base path from the server.")
+            ServerField(
+                label = "Domain / workgroup",
+                value = state.domain,
+                error = null,
+                helperText = "Optional SMB domain (e.g., WORKGROUP)",
+            ) {
+                viewModel.updateEditorField(ServerEditorField.DOMAIN, it)
             }
             ServerField("Username", state.username, state.validation.usernameError) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
@@ -314,22 +362,23 @@ private fun DiscoveryDialog(
                 }
                 androidx.compose.foundation.lazy.LazyColumn(
                     modifier = Modifier.heightIn(max = 260.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     items(state.servers, key = { it.ipAddress }) { server ->
+                        val displayHost = server.host.lowercase()
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onUseServer(server) }
-                                .padding(vertical = 6.dp),
+                                .padding(vertical = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Column {
-                                if (server.host.equals(server.ipAddress, ignoreCase = true)) {
-                                    Text(server.ipAddress)
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                if (displayHost.equals(server.ipAddress, ignoreCase = true)) {
+                                    Text(server.ipAddress, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 } else {
-                                    Text(server.host)
-                                    Text(server.ipAddress)
+                                    Text(displayHost, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(server.ipAddress, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                             TextButton(onClick = { onUseServer(server) }) {
@@ -353,10 +402,182 @@ private fun DiscoveryDialog(
     )
 }
 
+
+@Composable
+private fun BrowseDestinationDialog(
+    state: SmbBrowseUiState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onSelectShare: (String) -> Unit,
+    onOpenDirectory: (String) -> Unit,
+    onNavigateBreadcrumb: (Int) -> Unit,
+    onUseLocation: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Browse SMB destination") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.Start,
+            ) {
+                if (state.selectedShare.isBlank()) {
+                    Text("Select a share")
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BreadcrumbButton(label = "/", onClick = { onNavigateBreadcrumb(-1) })
+                        state.breadcrumbs.forEachIndexed { index, segment ->
+                            BreadcrumbButton(
+                                label = if (segment.isBlank()) state.selectedShare else segment,
+                                onClick = { onNavigateBreadcrumb(index) },
+                            )
+                        }
+                    }
+                }
+                if (state.isLoading) {
+                    Text("Loading...")
+                }
+                if (!state.errorMessage.isNullOrBlank()) {
+                    Text(state.errorMessage)
+                }
+                if (!state.isLoading && state.errorMessage.isNullOrBlank() && state.selectedShare.isBlank() && state.shares.isEmpty()) {
+                    Text("No shares returned yet. Tap Refresh to retry.")
+                }
+                if (!state.isLoading && state.errorMessage.isNullOrBlank() && state.selectedShare.isNotBlank() && state.directories.isEmpty()) {
+                    Text("No folders found at this location.")
+                }
+                val browseEntries = if (state.selectedShare.isBlank()) {
+                    state.shares.map { BrowseListItem.Share(it) }
+                } else {
+                    val pathSegments = state.currentPath.split('/').filter { it.isNotBlank() }
+                    val breadcrumbIndex = if (pathSegments.isEmpty()) -1 else pathSegments.size - 1
+                    buildList<BrowseListItem> {
+                        add(BrowseListItem.UpDirectory(breadcrumbIndex))
+                        addAll(state.directories.map { BrowseListItem.Directory(it) })
+                    }
+                }
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 260.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    items(browseEntries, key = { it.key }) { entry ->
+                        when (entry) {
+                            is BrowseListItem.Share -> {
+                                BrowseListEntryRow(
+                                    label = entry.name,
+                                    onRowClick = { onSelectShare(entry.name) },
+                                    onActionClick = { onSelectShare(entry.name) },
+                                )
+                            }
+                            is BrowseListItem.Directory -> {
+                                BrowseListEntryRow(
+                                    label = entry.name,
+                                    onRowClick = { onOpenDirectory(entry.name) },
+                                    onActionClick = { onOpenDirectory(entry.name) },
+                                )
+                            }
+                            is BrowseListItem.UpDirectory -> {
+                                BrowseListEntryRow(
+                                    label = "/",
+                                    modifier = Modifier.semantics { contentDescription = "Up Directory" },
+                                    onRowClick = { onNavigateBreadcrumb(entry.breadcrumbIndex) },
+                                    onActionClick = { onNavigateBreadcrumb(entry.breadcrumbIndex) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = onRefresh, enabled = !state.isLoading) {
+                    Text("Refresh")
+                }
+                TextButton(onClick = onUseLocation, enabled = state.selectedShare.isNotBlank()) {
+                    Text("Use location")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
 private fun ServerListItemUiState.connectionStatusLabel(): String {
     return when (lastTestStatus) {
         "SUCCESS" -> "Connection: Passed${lastTestLatencyMs?.let { " (${it}ms)" } ?: ""}"
         "FAILED" -> "Connection: Failed"
         else -> "Connection: Not tested"
     }
+}
+
+@Composable
+private fun BrowseListEntryRow(
+    label: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String = "Open",
+    onRowClick: () -> Unit,
+    onActionClick: () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onRowClick)
+            .padding(vertical = 1.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            actionLabel,
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier
+                .widthIn(min = 64.dp)
+                .clickable(onClick = onActionClick)
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun BreadcrumbButton(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        label,
+        color = MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+private sealed class BrowseListItem(val key: String) {
+    data class Share(val name: String) : BrowseListItem("share:$name")
+    data class Directory(val name: String) : BrowseListItem("dir:$name")
+    data class UpDirectory(val breadcrumbIndex: Int) : BrowseListItem("up-directory")
 }

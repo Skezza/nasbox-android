@@ -12,15 +12,17 @@ import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.data.smb.SmbClient
 import skezza.smbsync.data.smb.SmbConnectionRequest
 import skezza.smbsync.data.smb.SmbConnectionResult
+import skezza.smbsync.data.smb.SmbShareRpcEnumerator
 import skezza.smbsync.data.discovery.SmbServerDiscoveryScanner
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbDestinationUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 
 class VaultViewModelFactoryTest {
 
     @Test
     fun factoryCreateWithClassAndExtras_returnsVaultViewModel() {
-        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase())
+        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase(), fakeBrowseUseCase())
 
         val vmFromClass = factory.create(VaultViewModel::class.java)
         val vmFromExtras = factory.create(VaultViewModel::class.java, MutableCreationExtras())
@@ -31,7 +33,7 @@ class VaultViewModelFactoryTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun factoryRejectsUnknownViewModelClass() {
-        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase())
+        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase(), fakeBrowseUseCase())
         factory.create(UnknownViewModel::class.java)
     }
 
@@ -43,12 +45,41 @@ class VaultViewModelFactoryTest {
         },
     )
 
+
+
+    private fun fakeBrowseUseCase(): BrowseSmbDestinationUseCase = BrowseSmbDestinationUseCase(
+        smbClient = object : SmbClient {
+            override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = SmbConnectionResult(1)
+            override suspend fun listShares(host: String, username: String, password: String): List<String> = emptyList()
+            override suspend fun listDirectories(
+                host: String,
+                shareName: String,
+                path: String,
+                username: String,
+                password: String,
+            ): List<String> = emptyList()
+        },
+        shareRpcEnumerator = object : SmbShareRpcEnumerator {
+            override suspend fun listSharesViaRpc(host: String, username: String, password: String, domain: String): List<String> = emptyList()
+        },
+    )
+
     private fun fakeUseCase(): TestSmbConnectionUseCase = TestSmbConnectionUseCase(
         serverRepository = FakeServerRepository(),
         credentialStore = FakeCredentialStore(),
         smbClient = object : SmbClient {
             override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
                 SmbConnectionResult(latencyMs = 1)
+
+            override suspend fun listShares(host: String, username: String, password: String): List<String> = emptyList()
+
+            override suspend fun listDirectories(
+                host: String,
+                shareName: String,
+                path: String,
+                username: String,
+                password: String,
+            ): List<String> = emptyList()
         },
     )
 
