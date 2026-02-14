@@ -46,7 +46,8 @@ class SmbjClient : SmbClient {
         contentLengthBytes: Long?,
         inputStream: InputStream,
         onProgressBytes: (Long) -> Unit,
-    ) = withContext(Dispatchers.IO) {
+    ) {
+        withContext(Dispatchers.IO) {
         Log.i(
             LOG_TAG,
             "uploadFile start host=${request.host} share=${request.shareName} path=$remotePath size=${contentLengthBytes ?: -1}",
@@ -93,6 +94,7 @@ class SmbjClient : SmbClient {
                 "uploadFile failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}",
             )
             throw it
+        }
         }
     }
 
