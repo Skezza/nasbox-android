@@ -3,14 +3,15 @@
 This plan sequences delivery into reviewable phases while keeping the app functional after every phase.
 
 ## Delivery principles
-## Current execution status
+-## Current execution status
 - ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
 - ✅ Phase 1 — Persistence foundation: **Completed**.
 - ✅ Phase 2 — Credential security and Vault management: **Completed**.
 - ✅ Phase 3 — SMB connectivity and test flow: **Completed**.
 - ✅ Phase 4 — Media source integration and Plan management: **Completed**.
 - 🧭 Phase 4.5 — Guided SMB destination browse assist: **Proposed**.
-
+- ✅ Phase 5 — Core sync engine (manual-run, archive-only): **Completed**.
+- ⏳ Phase 5.5 — Source expansion execution (folder + full-device): **Planned**.
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
 - Validate phase exit criteria before advancing.
@@ -140,30 +141,6 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ---
 
-## Phase 5 — Core sync engine (manual-run, archive-only)
-
-### Goals
-- Deliver the core backup behavior and proof-of-backup guarantees.
-
-### Work
-- Implement run use case pipeline:
-  - initialize run
-  - scan items for selected album
-  - skip known items via backup records
-  - render remote path and ensure directories
-  - upload via stream with progress
-  - persist backup records for successful uploads
-  - finalize run status and counters
-- Implement continue-on-error behavior for per-item failures.
-- Persist run logs and error summaries.
-
-### Exit criteria
-- Manual run uploads new items and records proof.
-- Re-run skips previously uploaded items.
-- Run status and counters are accurate.
-
----
-
 ## Phase 4.5 — Guided SMB destination browse assist (new)
 
 ### Why this exists
@@ -202,6 +179,68 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - Selecting a folder updates Share + Base path fields with normalized values.
 - Errors are clear and recoverable; user can still manually input values if browse fails.
 - Unit tests cover path normalization, breadcrumb navigation state, and error mapping.
+
+---
+
+## Phase 5 — Core sync engine (manual-run, archive-only)
+
+### Goals
+- Deliver the core backup behavior and proof-of-backup guarantees.
+
+### Work
+- Implement run use case pipeline:
+  - initialize run
+  - scan items for selected album
+  - skip known items via backup records
+  - render remote path and ensure directories
+  - upload via stream with progress
+  - persist backup records for successful uploads
+  - finalize run status and counters
+- Implement continue-on-error behavior for per-item failures.
+- Persist run logs and error summaries.
+
+### Exit criteria
+- Manual run uploads new items and records proof.
+- Re-run skips previously uploaded items.
+- Run status and counters are accurate.
+
+### Implementation status
+- ✅ Completed: a Phase-5 `RunPlanBackupUseCase` now orchestrates run initialization, album scan, skip-vs-upload decisions, SMB upload, backup-proof persistence, and terminal run finalization.
+- ✅ Completed: backup execution is archive-only and continue-on-error, preserving per-run counters for scanned/uploaded/skipped/failed media.
+- ✅ Completed: per-run logs and summary errors are persisted for diagnostics, including start/scan/finish lifecycle events and item-level failure messages.
+- ✅ Completed: Plans list now includes a manual **Run now** action per plan so users can trigger MVP runs without waiting for the dashboard mission-control phase.
+- ⚠️ Scoped limitation: Phase-5 execution currently supports album-based plans; folder/full-device sources are rejected with explicit failed-run summaries until a later phase extends source scanning.
+
+---
+
+## Phase 5.5 — Source expansion execution (folder + full-device)
+
+### Goals
+- Extend the Phase-5 run engine to execute non-album plans created in Phase 4.
+- Deliver practical folder and full-device backup execution while preserving MVP archive-only semantics.
+
+### Work
+- Implement source scanning pipeline for `FOLDER` plans:
+  - enumerate items from selected folder URI/path source
+  - map stable per-item identifiers for backup-proof records
+  - stream readable files into existing SMB upload pipeline
+- Implement source scanning pipeline for `FULL_DEVICE` plans:
+  - enumerate configured shared-storage roots
+  - apply include/exclude safeguards for unsupported/system paths
+  - process files with continue-on-error behavior
+- Reuse existing backup-proof model (`plan + media/item id`) for duplicate prevention across new source modes.
+- Ensure non-templated plan behavior preserves source-style folder/file naming where intended.
+- Extend run logs and summary messages to clearly identify source-mode-specific failures.
+
+### Exit criteria
+- Folder plans can run end-to-end and upload new items.
+- Full-device plans can run end-to-end on shared storage with clear progress/failure reporting.
+- Re-runs skip already-backed-up items for folder/full-device sources.
+- Status/counters/logging remain accurate for all supported source modes.
+
+### Implementation status
+- ⏳ Not started in code yet (documentation planning phase only).
+- ✅ Scope intent: this phase closes the known Phase-5 limitation where runtime execution is album-only.
 
 ---
 
@@ -271,5 +310,6 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ## Suggested sequencing notes for agentic implementation
 - Do not start sync engine before security, SMB test, and plan persistence are in place.
+- Land Phase 5.5 source-expansion execution before depending on dashboard controls to trigger folder/full-device runs.
 - Keep dashboard wiring thin until run and log repositories are stable.
 - Treat run logs as first-class data early to reduce debugging friction in later phases.

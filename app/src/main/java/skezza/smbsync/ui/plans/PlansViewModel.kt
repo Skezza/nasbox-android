@@ -22,11 +22,13 @@ import skezza.smbsync.domain.plan.PlanInput
 import skezza.smbsync.domain.plan.PlanSourceType
 import skezza.smbsync.domain.plan.PlanValidationResult
 import skezza.smbsync.domain.plan.ValidatePlanInputUseCase
+import skezza.smbsync.domain.sync.RunPlanBackupUseCase
 
 class PlansViewModel(
     private val planRepository: PlanRepository,
     private val serverRepository: ServerRepository,
     private val listMediaAlbumsUseCase: ListMediaAlbumsUseCase,
+    private val runPlanBackupUseCase: RunPlanBackupUseCase,
     private val validatePlanInputUseCase: ValidatePlanInputUseCase = ValidatePlanInputUseCase(),
 ) : ViewModel() {
 
@@ -44,6 +46,9 @@ class PlansViewModel(
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    private val _activeRunPlanIds = MutableStateFlow<Set<Long>>(emptySet())
+    val activeRunPlanIds: StateFlow<Set<Long>> = _activeRunPlanIds.asStateFlow()
 
     val plans: StateFlow<List<PlanListItemUiState>> = combine(
         planRepository.observePlans(),
@@ -82,6 +87,10 @@ class PlansViewModel(
 
     fun clearMessage() {
         _message.value = null
+    }
+
+    fun showMessage(message: String) {
+        _message.value = message
     }
 
     fun setMediaPermissionGranted(granted: Boolean) {
@@ -196,6 +205,23 @@ class PlansViewModel(
         }
     }
 
+
+    fun runPlanNow(planId: Long) {
+        viewModelScope.launch {
+            _activeRunPlanIds.value = _activeRunPlanIds.value + planId
+            runCatching { runPlanBackupUseCase(planId) }
+                .onSuccess { result ->
+                    val base = "Run ${result.status.lowercase()} · uploaded ${result.uploadedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}"
+                    _message.value = result.summaryError?.let { "$base. $it" } ?: base
+                }
+                .onFailure { error ->
+                    val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName.orEmpty()
+                    _message.value = "Run could not start: $detail"
+                }
+            _activeRunPlanIds.value = _activeRunPlanIds.value - planId
+        }
+    }
+
     fun deletePlan(planId: Long) {
         viewModelScope.launch {
             runCatching { planRepository.deletePlan(planId) }
@@ -229,11 +255,12 @@ class PlansViewModel(
             planRepository: PlanRepository,
             serverRepository: ServerRepository,
             listMediaAlbumsUseCase: ListMediaAlbumsUseCase,
+            runPlanBackupUseCase: RunPlanBackupUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(PlansViewModel::class.java)) {
                     @Suppress("UNCHECKED_CAST")
-                    return PlansViewModel(planRepository, serverRepository, listMediaAlbumsUseCase) as T
+                    return PlansViewModel(planRepository, serverRepository, listMediaAlbumsUseCase, runPlanBackupUseCase) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }
