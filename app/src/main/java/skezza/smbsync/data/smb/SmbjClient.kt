@@ -1,8 +1,10 @@
 package skezza.smbsync.data.smb
 
 import com.hierynomus.protocol.commons.buffer.Buffer
+import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.share.DiskShare
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import kotlin.system.measureTimeMillis
@@ -28,6 +30,48 @@ class SmbjClient : SmbClient {
         }
         SmbConnectionResult(latencyMs = latency)
     }
+
+    override suspend fun listShares(request: SmbConnectionRequest): List<String> = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    session.listShares()
+                        .map { it.netName.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .sorted()
+                }
+            }
+        }
+    }
+
+    override suspend fun listDirectories(request: SmbConnectionRequest, path: String): List<String> = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    val share = session.connectShare(request.shareName) as DiskShare
+                    share.use {
+                        share.list(path.normalizeSmbPath())
+                            .asSequence()
+                            .filter { it.fileName != "." && it.fileName != ".." }
+                            .filter { it.fileAttributes.contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY) }
+                            .map { it.fileName }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .sorted()
+                            .toList()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun String.normalizeSmbPath(): String {
+    val normalized = trim().replace('\\', '/').trim('/')
+    return normalized.ifBlank { "" }
 }
 
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {

@@ -14,9 +14,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
@@ -179,6 +181,7 @@ fun ServerEditorScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.editorState.collectAsState()
+    val browserState by viewModel.browserState.collectAsState()
     val message by viewModel.message.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -249,6 +252,15 @@ fun ServerEditorScreen(
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
+            SmbBrowserCard(
+                state = browserState,
+                onBrowseShares = viewModel::browseShares,
+                onPickShare = viewModel::openShare,
+                onOpenFolder = viewModel::openFolder,
+                onNavigateUp = viewModel::navigateFolderUp,
+                onUseCurrentFolder = viewModel::useCurrentFolderAsBasePath,
+            )
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
                     Text(if (serverId == null) "Create server" else "Save changes")
@@ -258,6 +270,82 @@ fun ServerEditorScreen(
                     enabled = !state.isTestingConnection,
                 ) {
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmbBrowserCard(
+    state: SmbBrowserUiState,
+    onBrowseShares: () -> Unit,
+    onPickShare: (String) -> Unit,
+    onOpenFolder: (String) -> Unit,
+    onNavigateUp: () -> Unit,
+    onUseCurrentFolder: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Smart browser")
+            Text("Discover shares and walk folders like a tiny treasure hunt.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ElevatedButton(onClick = onBrowseShares, enabled = !state.isLoading) {
+                    Text(if (state.isLoading) "Browsing..." else "Browse shares")
+                }
+                ElevatedButton(onClick = onUseCurrentFolder) {
+                    Text("Use folder")
+                }
+            }
+
+            if (state.errorMessage != null) {
+                Text(state.errorMessage)
+            }
+
+            if (state.shares.isNotEmpty()) {
+                Text("Shares")
+                state.shares.forEach { share ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPickShare(share) }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(if (share == state.selectedShare) "✓ $share" else share)
+                        TextButton(onClick = { onPickShare(share) }) {
+                            Text("Pick")
+                        }
+                    }
+                }
+            }
+
+            if (state.selectedShare.isNotBlank()) {
+                val pathLabel = if (state.currentPathSegments.isEmpty()) "/" else "/${state.currentPathSegments.joinToString("/")}"
+                Text("Location: ${state.selectedShare}$pathLabel")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onNavigateUp, enabled = state.currentPathSegments.isNotEmpty()) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Text("Up")
+                    }
+                }
+                if (state.folders.isEmpty() && !state.isLoading) {
+                    Text("No child folders found here.")
+                }
+                state.folders.forEach { folder ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenFolder(folder) }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Folder, contentDescription = null)
+                            Text(folder)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                    }
                 }
             }
         }
