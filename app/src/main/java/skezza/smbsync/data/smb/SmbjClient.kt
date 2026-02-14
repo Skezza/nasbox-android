@@ -1,5 +1,6 @@
 package skezza.smbsync.data.smb
 
+import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.protocol.commons.buffer.Buffer
 import com.hierynomus.smbj.SMBClient
@@ -17,6 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class SmbjClient : SmbClient {
+    companion object {
+        private const val LOG_TAG = "SMBSyncSmb"
+    }
     override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = withContext(Dispatchers.IO) {
         val latency = measureTimeMillis {
             SMBClient().use { smbClient ->
@@ -42,7 +46,9 @@ class SmbjClient : SmbClient {
         inputStream: InputStream,
         onProgressBytes: (Long) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        SMBClient().use { smbClient ->
+        Log.i(LOG_TAG, "uploadFile start host=${request.host} share=${request.shareName} path=$remotePath size=${contentLengthBytes ?: -1}")
+        runCatching {
+            SMBClient().use { smbClient ->
             smbClient.connect(request.host).use { connection ->
                 val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
                 connection.authenticate(authContext).use { session ->
@@ -69,11 +75,15 @@ class SmbjClient : SmbClient {
                                 onProgressBytes(totalWritten)
                             }
                             output.flush()
+                            Log.i(LOG_TAG, "uploadFile complete path=$remotePath bytes=$totalWritten")
                         }
                     } ?: error("Connected share is not a disk share")
                     share.close()
                 }
             }
+        }.onFailure {
+            Log.e(LOG_TAG, "uploadFile failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}")
+            throw it
         }
     }
 

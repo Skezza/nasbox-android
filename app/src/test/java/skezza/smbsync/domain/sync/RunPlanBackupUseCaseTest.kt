@@ -163,6 +163,46 @@ class RunPlanBackupUseCaseTest {
         assertEquals("FAILED", result.status)
     }
 
+
+    @Test
+    fun invoke_returnsExplicitSummaryForUnsupportedSourceMode() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Folder",
+            sourceAlbum = "",
+            sourceType = "FOLDER",
+            folderPath = "/storage/emulated/0/DCIM",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val server = ServerEntity(
+            serverId = 20,
+            name = "NAS",
+            host = "host",
+            shareName = "share",
+            basePath = "photos",
+            username = "user",
+            credentialAlias = "alias",
+        )
+
+        val result = RunPlanBackupUseCase(
+            planRepository = FakePlanRepository(plan),
+            serverRepository = FakeServerRepository(server),
+            backupRecordRepository = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepository = FakeRunRepository(),
+            runLogRepository = FakeRunLogRepository(),
+            credentialStore = FakeCredentialStore("pw"),
+            mediaStoreDataSource = FakeMediaStoreDataSource(emptyList()),
+            smbClient = FakeSmbClient(),
+            nowEpochMs = { 1000L },
+        )(plan.planId)
+
+        assertEquals("FAILED", result.status)
+        assertEquals("Only album-based plans are supported in Phase 5.", result.summaryError)
+    }
+
     @Test
     fun sanitizeSegment_replacesIllegalCharacters() {
         val sanitized = PathRenderer.sanitizeSegment("cam<era>:name?.jpg")

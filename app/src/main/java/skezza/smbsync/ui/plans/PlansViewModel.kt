@@ -211,7 +211,8 @@ class PlansViewModel(
             _activeRunPlanIds.value = _activeRunPlanIds.value + planId
             runCatching { runPlanBackupUseCase(planId) }
                 .onSuccess { result ->
-                    _message.value = "Run ${result.status.lowercase()} · uploaded ${result.uploadedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}"
+                    val base = "Run ${result.status.lowercase()} · uploaded ${result.uploadedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}"
+                    _message.value = result.summaryError?.let { "$base. $it" } ?: base
                 }
                 .onFailure { error ->
                     val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName.orEmpty()

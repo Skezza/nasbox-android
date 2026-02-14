@@ -1,6 +1,7 @@
 package skezza.smbsync.domain.sync
 
 import android.os.Build
+import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,6 +45,12 @@ class RunPlanBackupUseCase(
         )
 
         suspend fun log(severity: String, message: String, detail: String? = null) {
+            val formatted = "[runId=$runId planId=$planId] $message"
+            if (severity == SEVERITY_ERROR) {
+                Log.e(LOG_TAG, formatted + detail?.let { " | $it" }.orEmpty())
+            } else {
+                Log.i(LOG_TAG, formatted + detail?.let { " | $it" }.orEmpty())
+            }
             runLogRepository.createLog(
                 RunLogEntity(
                     runId = runId,
@@ -288,7 +295,7 @@ class RunPlanBackupUseCase(
             ),
         )
         log(SEVERITY_INFO, "Run finished", "status=$status uploaded=$uploaded skipped=$skipped failed=$failed")
-        return RunExecutionResult(runId = runId, status = status, uploadedCount = uploaded, skippedCount = skipped, failedCount = failed)
+        return RunExecutionResult(runId = runId, status = status, uploadedCount = uploaded, skippedCount = skipped, failedCount = failed, summaryError = summaryError)
     }
 
     companion object {
@@ -299,6 +306,7 @@ class RunPlanBackupUseCase(
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
         private const val SEVERITY_INFO = "INFO"
         private const val SEVERITY_ERROR = "ERROR"
+        private const val LOG_TAG = "SMBSyncRun"
 
     }
 }
@@ -309,6 +317,7 @@ data class RunExecutionResult(
     val uploadedCount: Int,
     val skippedCount: Int,
     val failedCount: Int,
+    val summaryError: String? = null,
 )
 
 internal object PathRenderer {
