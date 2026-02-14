@@ -278,6 +278,7 @@ private fun ServerField(
         onValueChange = onChange,
         label = { Text(label) },
         isError = error != null,
+        singleLine = true,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         modifier = Modifier.fillMaxWidth(),
         supportingText = {

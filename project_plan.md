@@ -8,7 +8,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 1 — Persistence foundation: **Completed**.
 - ✅ Phase 2 — Credential security and Vault management: **Completed**.
 - ✅ Phase 3 — SMB connectivity and test flow: **Completed**.
-- ⏳ Phase 4 — Media source integration and Plan management: **Next**.
+- ✅ Phase 4 — Media source integration and Plan management: **Completed**.
 
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
@@ -129,6 +129,13 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Exit criteria
 - User can create and edit valid plans.
 - Missing-permission and missing-prerequisite states are clear and actionable.
+
+### Implementation status
+- ✅ Completed: MediaStore-backed album listing and per-album image-item access are implemented behind a dedicated data-source/use-case boundary.
+- ✅ Completed: runtime media permission handling is wired for Android 13+ (`READ_MEDIA_IMAGES`) and legacy devices (`READ_EXTERNAL_STORAGE`).
+- ✅ Completed: Plans list and editor now support create/edit/delete with name, enablement, album, server, template, and filename pattern fields.
+- ✅ Completed: first-plan defaults auto-select a camera-like album when available and seed default template/pattern values.
+- ✅ Scope extension: plan creation now supports both Photo Album plans and General Folder plans, with optional video inclusion, optional album templating controls, and a full-phone shared-storage backup mode with user guidance.
 
 ---
 

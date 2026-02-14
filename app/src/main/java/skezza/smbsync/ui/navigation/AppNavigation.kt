@@ -28,7 +28,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import skezza.smbsync.AppContainer
 import skezza.smbsync.ui.screens.EditorPlaceholderScreen
-import skezza.smbsync.ui.screens.RootPlaceholderScreen
+import skezza.smbsync.ui.plans.PlanEditorScreen
+import skezza.smbsync.ui.plans.PlansScreen
+import skezza.smbsync.ui.plans.PlansViewModel
 import skezza.smbsync.ui.vault.ServerEditorScreen
 import skezza.smbsync.ui.vault.VaultScreen
 import skezza.smbsync.ui.vault.VaultViewModel
@@ -37,6 +39,7 @@ private const val ROUTE_DASHBOARD = "dashboard"
 private const val ROUTE_PLANS = "plans"
 private const val ROUTE_VAULT = "vault"
 private const val ROUTE_SERVER_EDITOR = "serverEditor"
+private const val ROUTE_PLAN_EDITOR = "planEditor"
 private const val ROUTE_RUN_DETAIL = "runDetail"
 
 private enum class TopLevelDestination(
@@ -62,6 +65,13 @@ fun SMBSyncApp(
             credentialStore = appContainer.credentialStore,
             testSmbConnectionUseCase = appContainer.testSmbConnectionUseCase,
             discoverSmbServersUseCase = appContainer.discoverSmbServersUseCase,
+        ),
+    )
+    val plansViewModel: PlansViewModel = viewModel(
+        factory = PlansViewModel.factory(
+            planRepository = appContainer.planRepository,
+            serverRepository = appContainer.serverRepository,
+            listMediaAlbumsUseCase = appContainer.listMediaAlbumsUseCase,
         ),
     )
 
@@ -96,7 +106,7 @@ fun SMBSyncApp(
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(ROUTE_DASHBOARD) {
-                RootPlaceholderScreen(
+                skezza.smbsync.ui.screens.RootPlaceholderScreen(
                     title = "Dashboard",
                     description = "Mission control placeholder. Run summaries and health indicators will be added in later phases.",
                     primaryActionLabel = "Run detail",
@@ -108,15 +118,10 @@ fun SMBSyncApp(
                 )
             }
             composable(ROUTE_PLANS) {
-                RootPlaceholderScreen(
-                    title = "Plans",
-                    description = "Plan list placeholder. CRUD and media/server binding will be implemented in later phases.",
-                    primaryActionLabel = "Coming in Phase 4",
-                    primaryActionIcon = Icons.Default.Folder,
-                    onPrimaryAction = {},
-                    secondaryActionLabel = "Open Vault",
-                    secondaryActionIcon = Icons.Default.Lock,
-                    onSecondaryAction = { navController.navigate(ROUTE_VAULT) },
+                PlansScreen(
+                    viewModel = plansViewModel,
+                    onAddPlan = { navController.navigate(ROUTE_PLAN_EDITOR) },
+                    onEditPlan = { planId -> navController.navigate("$ROUTE_PLAN_EDITOR/$planId") },
                 )
             }
             composable(ROUTE_VAULT) {
@@ -130,6 +135,23 @@ fun SMBSyncApp(
                 ServerEditorScreen(
                     viewModel = vaultViewModel,
                     serverId = null,
+                    onNavigateBack = { navController.popBackStack() },
+                )
+            }
+            composable(ROUTE_PLAN_EDITOR) {
+                PlanEditorScreen(
+                    viewModel = plansViewModel,
+                    planId = null,
+                    onNavigateBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = "$ROUTE_PLAN_EDITOR/{planId}",
+                arguments = listOf(navArgument("planId") { type = NavType.LongType }),
+            ) { backStackEntry ->
+                PlanEditorScreen(
+                    viewModel = plansViewModel,
+                    planId = backStackEntry.arguments?.getLong("planId"),
                     onNavigateBack = { navController.popBackStack() },
                 )
             }

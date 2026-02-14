@@ -17,13 +17,24 @@ object DatabaseProvider {
         }
     }
 
+
+
+    private val migration2To3 = object : Migration(2, 3) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE plans ADD COLUMN source_type TEXT NOT NULL DEFAULT 'ALBUM'")
+            database.execSQL("ALTER TABLE plans ADD COLUMN folder_path TEXT NOT NULL DEFAULT ''")
+            database.execSQL("ALTER TABLE plans ADD COLUMN include_videos INTEGER NOT NULL DEFAULT 0")
+            database.execSQL("ALTER TABLE plans ADD COLUMN use_album_templating INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
     fun get(context: Context): SMBSyncDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 SMBSyncDatabase::class.java,
                 "smbsync.db",
-            ).addMigrations(migration1To2)
+            ).addMigrations(migration1To2, migration2To3)
                 .build().also { instance = it }
         }
     }

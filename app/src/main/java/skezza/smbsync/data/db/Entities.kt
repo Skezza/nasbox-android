@@ -51,6 +51,14 @@ data class PlanEntity(
     val name: String,
     @ColumnInfo(name = "source_album")
     val sourceAlbum: String,
+    @ColumnInfo(name = "source_type")
+    val sourceType: String = "ALBUM",
+    @ColumnInfo(name = "folder_path")
+    val folderPath: String = "",
+    @ColumnInfo(name = "include_videos")
+    val includeVideos: Boolean = false,
+    @ColumnInfo(name = "use_album_templating")
+    val useAlbumTemplating: Boolean = false,
     @ColumnInfo(name = "server_id")
     val serverId: Long,
     @ColumnInfo(name = "directory_template")
