@@ -72,6 +72,7 @@ fun SMBSyncApp(
             planRepository = appContainer.planRepository,
             serverRepository = appContainer.serverRepository,
             listMediaAlbumsUseCase = appContainer.listMediaAlbumsUseCase,
+            runPlanBackupUseCase = appContainer.runPlanBackupUseCase,
         ),
     )
 
@@ -122,6 +123,7 @@ fun SMBSyncApp(
                     viewModel = plansViewModel,
                     onAddPlan = { navController.navigate(ROUTE_PLAN_EDITOR) },
                     onEditPlan = { planId -> navController.navigate("$ROUTE_PLAN_EDITOR/$planId") },
+                    onRunPlan = { planId -> plansViewModel.runPlanNow(planId) },
                 )
             }
             composable(ROUTE_VAULT) {

@@ -1,8 +1,11 @@
 package skezza.smbsync.data.media
 
 import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
+import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,11 +22,14 @@ data class MediaImageItem(
     val displayName: String?,
     val mimeType: String?,
     val dateTakenEpochMs: Long?,
+    val sizeBytes: Long?,
 )
 
 interface MediaStoreDataSource {
     suspend fun listAlbums(): List<MediaAlbum>
     suspend fun listImagesForAlbum(bucketId: String): List<MediaImageItem>
+    suspend fun openImageStream(mediaId: String): InputStream?
+    fun imageContentUri(mediaId: String): Uri
 }
 
 class AndroidMediaStoreDataSource(
@@ -38,6 +44,7 @@ class AndroidMediaStoreDataSource(
             MediaStore.Images.Media.BUCKET_ID,
             MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
             MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.SIZE,
         )
 
         val buckets = linkedMapOf<String, MutableAlbumAccumulator>()
@@ -96,6 +103,7 @@ class AndroidMediaStoreDataSource(
                 val displayNameIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
                 val mimeTypeIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
                 val dateTakenIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+                val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
 
                 while (cursor.moveToNext()) {
                     val mediaId = cursor.getLong(idIndex).toString()
@@ -108,11 +116,22 @@ class AndroidMediaStoreDataSource(
                             displayName = cursor.getString(displayNameIndex),
                             mimeType = cursor.getString(mimeTypeIndex),
                             dateTakenEpochMs = dateTaken,
+                            sizeBytes = cursor.getLong(sizeIndex).takeIf { it > 0L },
                         ),
                     )
                 }
             }
         }
+    }
+
+    override suspend fun openImageStream(mediaId: String): InputStream? = withContext(Dispatchers.IO) {
+        val id = mediaId.toLongOrNull() ?: return@withContext null
+        contentResolver.openInputStream(imageContentUri(id.toString()))
+    }
+
+    override fun imageContentUri(mediaId: String): Uri {
+        val id = mediaId.toLongOrNull() ?: return MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
     }
 }
 

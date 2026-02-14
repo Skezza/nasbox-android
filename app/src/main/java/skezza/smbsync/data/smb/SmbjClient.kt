@@ -1,8 +1,15 @@
 package skezza.smbsync.data.smb
 
+import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.protocol.commons.buffer.Buffer
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.share.DiskShare
+import com.hierynomus.msfscc.FileAttributes
+import com.hierynomus.mssmb2.SMB2CreateDisposition
+import com.hierynomus.mssmb2.SMB2CreateOptions
+import com.hierynomus.mssmb2.SMB2ShareAccess
+import java.io.InputStream
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import kotlin.system.measureTimeMillis
@@ -17,7 +24,6 @@ class SmbjClient : SmbClient {
                     val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
                     connection.authenticate(authContext).use { session ->
                         if (request.shareName.isBlank()) {
-                            // Root-level validation: auth + session establishment only.
                             Unit
                         } else {
                             session.connectShare(request.shareName).close()
@@ -27,6 +33,60 @@ class SmbjClient : SmbClient {
             }
         }
         SmbConnectionResult(latencyMs = latency)
+    }
+
+    override suspend fun uploadFile(
+        request: SmbConnectionRequest,
+        remotePath: String,
+        contentLengthBytes: Long?,
+        inputStream: InputStream,
+        onProgressBytes: (Long) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    val share = session.connectShare(request.shareName)
+                    (share as? DiskShare)?.use { diskShare ->
+                        val normalizedPath = remotePath.replace("\\", "/").trim('/')
+                        ensureDirectories(diskShare, normalizedPath)
+                        val file = diskShare.openFile(
+                            normalizedPath.replace('/', '\\'),
+                            setOf(AccessMask.GENERIC_WRITE),
+                            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+                            setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                            SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+                        )
+                        file.outputStream.use { output ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var totalWritten = 0L
+                            while (true) {
+                                val read = inputStream.read(buffer)
+                                if (read <= 0) break
+                                output.write(buffer, 0, read)
+                                totalWritten += read
+                                onProgressBytes(totalWritten)
+                            }
+                            output.flush()
+                        }
+                    } ?: error("Connected share is not a disk share")
+                    share.close()
+                }
+            }
+        }
+    }
+
+    private fun ensureDirectories(share: DiskShare, remotePath: String) {
+        val parts = remotePath.split('/').filter { it.isNotBlank() }
+        if (parts.size <= 1) return
+        var current = ""
+        for (segment in parts.dropLast(1)) {
+            current = if (current.isBlank()) segment else "$current\\$segment"
+            if (!share.folderExists(current)) {
+                share.mkdir(current)
+            }
+        }
     }
 }
 

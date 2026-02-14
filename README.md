@@ -18,7 +18,8 @@ SMBSync is an Android app focused on **manual, archive-only photo backup** from 
 - ℹ️ Vault host input accepts either raw host (`quanta.local`) or SMB URI form (`smb://quanta.local/share`) for connection testing.
 - ✅ Phase 4 complete: MediaStore album integration, runtime photo permission flow, and full plan management are implemented.
 - ✨ Plans now support **Photo Album** and **General Folder** source types, optional video inclusion for album plans, optional album templating, and a full-phone backup preset for shared storage.
-- ⏳ Next: Phase 5 core sync engine (manual-run, archive-only).
+- ✅ Phase 5 complete: core sync engine is implemented with run records, item-level continue-on-error handling, SMB uploads, and backup-proof persistence.
+- ⏳ Next: Phase 6 dashboard mission control and live timeline surfaces.
 
 See:
 - `project_plan.md` for phase-by-phase roadmap
@@ -42,6 +43,14 @@ Vault also provides a **Discover servers** action that scans the current Wi-Fi s
 - For mDNS hosts like `quanta.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
 - Discovery reliability is lower on Android emulators because guest networking (NAT) may block broadcast/mDNS/LAN reachability; prefer testing discovery on a physical device.
 
+
+## Manual run behavior (Phase 5)
+
+- Plans list exposes a **Run now** action for immediate manual execution.
+- Each run persists `runs` counters (scanned/uploaded/skipped/failed), terminal status (`SUCCESS`/`PARTIAL`/`FAILED`), and summary error when present.
+- Re-running a plan skips previously uploaded media using backup-proof records keyed by `(plan_id, media_item_id)`.
+- Upload path generation applies token rendering and SMB-safe segment sanitization before directory creation and stream upload.
+- Current implementation supports album-backed plans for execution; folder/full-device plans report unsupported-source failure until later phases.
 
 ## Plans and media prerequisites
 

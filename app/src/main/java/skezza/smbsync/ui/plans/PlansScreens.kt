@@ -60,10 +60,12 @@ fun PlansScreen(
     viewModel: PlansViewModel,
     onAddPlan: () -> Unit,
     onEditPlan: (Long) -> Unit,
+    onRunPlan: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val plans by viewModel.plans.collectAsState()
     val message by viewModel.message.collectAsState()
+    val activeRunPlanIds by viewModel.activeRunPlanIds.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(message) {
@@ -130,6 +132,12 @@ fun PlansScreen(
                             Text(if (plan.enabled) "Enabled" else "Disabled")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
+                                Button(
+                                    onClick = { onRunPlan(plan.planId) },
+                                    enabled = plan.enabled && !activeRunPlanIds.contains(plan.planId),
+                                ) {
+                                    Text(if (activeRunPlanIds.contains(plan.planId)) "Running..." else "Run now")
+                                }
                                 Button(onClick = { viewModel.deletePlan(plan.planId) }) {
                                     Icon(Icons.Default.Delete, contentDescription = null)
                                     Text("Delete", modifier = Modifier.padding(start = 6.dp))

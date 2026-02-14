@@ -9,6 +9,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 2 — Credential security and Vault management: **Completed**.
 - ✅ Phase 3 — SMB connectivity and test flow: **Completed**.
 - ✅ Phase 4 — Media source integration and Plan management: **Completed**.
+- ✅ Phase 5 — Core sync engine (manual-run, archive-only): **Completed**.
 
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
@@ -160,6 +161,13 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - Manual run uploads new items and records proof.
 - Re-run skips previously uploaded items.
 - Run status and counters are accurate.
+
+### Implementation status
+- ✅ Completed: a Phase-5 `RunPlanBackupUseCase` now orchestrates run initialization, album scan, skip-vs-upload decisions, SMB upload, backup-proof persistence, and terminal run finalization.
+- ✅ Completed: backup execution is archive-only and continue-on-error, preserving per-run counters for scanned/uploaded/skipped/failed media.
+- ✅ Completed: per-run logs and summary errors are persisted for diagnostics, including start/scan/finish lifecycle events and item-level failure messages.
+- ✅ Completed: Plans list now includes a manual **Run now** action per plan so users can trigger MVP runs without waiting for the dashboard mission-control phase.
+- ⚠️ Scoped limitation: Phase-5 execution currently supports album-based plans; folder/full-device sources are rejected with explicit failed-run summaries until a later phase extends source scanning.
 
 ---
 
