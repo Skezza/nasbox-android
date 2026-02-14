@@ -25,7 +25,7 @@ class BrowseSmbServerUseCase(
             smbClient.listShares(
                 SmbConnectionRequest(
                     host = target.host,
-                    shareName = "",
+                    shareName = target.shareName,
                     username = username.trim(),
                     password = password,
                 ),

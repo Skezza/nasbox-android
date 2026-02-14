@@ -1,7 +1,6 @@
 package skezza.smbsync.data.smb
 
 import com.hierynomus.protocol.commons.buffer.Buffer
-import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.share.DiskShare
@@ -35,14 +34,15 @@ class SmbjClient : SmbClient {
         SMBClient().use { smbClient ->
             smbClient.connect(request.host).use { connection ->
                 val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
-                connection.authenticate(authContext).use { session ->
-                    session.listShares()
-                        .map { it.netName.trim() }
-                        .filter { it.isNotBlank() }
-                        .distinct()
-                        .sorted()
-                }
+                connection.authenticate(authContext).close()
             }
+        }
+
+        val hintedShare = request.shareName.trim().trim('/').trim('\\')
+        if (hintedShare.isNotBlank()) {
+            listOf(hintedShare)
+        } else {
+            emptyList()
         }
     }
 
@@ -53,11 +53,12 @@ class SmbjClient : SmbClient {
                 connection.authenticate(authContext).use { session ->
                     val share = session.connectShare(request.shareName) as DiskShare
                     share.use {
-                        share.list(path.normalizeSmbPath())
+                        val normalizedPath = path.normalizeSmbPath()
+                        share.list(normalizedPath)
                             .asSequence()
                             .filter { it.fileName != "." && it.fileName != ".." }
-                            .filter { it.fileAttributes.contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY) }
                             .map { it.fileName }
+                            .filter { share.folderExists(normalizedPath.appendPathSegment(it)) }
                             .filter { it.isNotBlank() }
                             .distinct()
                             .sorted()
@@ -72,6 +73,12 @@ class SmbjClient : SmbClient {
 private fun String.normalizeSmbPath(): String {
     val normalized = trim().replace('\\', '/').trim('/')
     return normalized.ifBlank { "" }
+}
+
+private fun String.appendPathSegment(segment: String): String {
+    val cleanSegment = segment.trim().replace('\\', '/').trim('/')
+    if (cleanSegment.isBlank()) return this
+    return if (isBlank()) cleanSegment else "$this/$cleanSegment"
 }
 
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {
