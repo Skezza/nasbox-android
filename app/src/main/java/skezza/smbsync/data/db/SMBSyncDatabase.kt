@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         RunEntity::class,
         RunLogEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class SMBSyncDatabase : RoomDatabase() {

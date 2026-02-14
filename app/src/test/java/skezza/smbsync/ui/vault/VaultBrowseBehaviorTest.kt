@@ -17,6 +17,7 @@ import skezza.smbsync.data.smb.SmbConnectionResult
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
 import skezza.smbsync.domain.smb.BrowseSmbDestinationUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
+import skezza.smbsync.data.smb.SmbShareRpcEnumerator
 
 class VaultBrowseBehaviorTest {
 
@@ -70,8 +71,12 @@ class VaultBrowseBehaviorTest {
                     override suspend fun discover(): List<DiscoveredSmbServer> = emptyList()
                 },
             ),
-            browseSmbDestinationUseCase = BrowseSmbDestinationUseCase(smbClient),
+            browseSmbDestinationUseCase = BrowseSmbDestinationUseCase(smbClient, emptyShareRpcEnumerator()),
         )
+    }
+
+    private fun emptyShareRpcEnumerator(): SmbShareRpcEnumerator = object : SmbShareRpcEnumerator {
+        override suspend fun listSharesViaRpc(host: String, username: String, password: String, domain: String): List<String> = emptyList()
     }
 
     private class TrackingSmbClient : SmbClient {

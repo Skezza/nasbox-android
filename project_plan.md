@@ -213,6 +213,28 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ---
 
+## Phase 5.5.1 — Share discovery fallback
+
+### Goals
+- Deliver a browse assistant that uses SMB2/3-compatible SRVSVC `NetShareEnum` over SMBJ RPC before any secondary fallback path.
+- Keep the Vault “Browse destination” flow fast and predictable while expanding the set of hosts that can prefill share + base path inputs automatically.
+
+### Work
+- Add a `SmbShareRpcEnumerator` data-layer contract implemented with SMBJ RPC (`IPC$` + SRVSVC `NetShareEnum`) and domain-aware authentication.
+- Update `BrowseSmbDestinationUseCase.listShares` to try RPC first, then call `SmbClient.listShares` only when RPC returns empty or throws, merging/deduplicating both lists before reporting success.
+- Wire `AppContainer` to provide the RPC enumerator so existing callers remain unchanged, and keep the server editor UI sheet behavioral surface untouched.
+- Expand domain tests to cover RPC-first success, fallback success, and combined failure messaging while retaining the existing “Connected, but no shares were returned” empty-state hint when no path yields names.
+
+### Exit criteria
+- Browse destination now surfaces valid share names whenever either SRVSVC RPC enumeration or SMBJ `listShares` succeeds.
+- Sorting/deduplication stays consistent, and users still see the familiar empty-state message when no shares are available.
+- Regression tests cover RPC-first behavior, fallback flow, and failure handoff so the message stays stable.
+
+### Implementation status
+- ✅ Completed: documentation, DI wiring, and tests now describe and verify the fallback behavior.
+
+---
+
 ## Phase 5.5 — Source expansion execution (folder + full-device)
 
 ### Goals

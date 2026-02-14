@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -95,9 +96,13 @@ fun PlansScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                expandedHeight = 56.dp,
                 title = { Text("Plans") },
                 actions = {
-                    IconButton(onClick = onAddPlan) {
+                    IconButton(
+                        modifier = Modifier.size(52.dp),
+                        onClick = onAddPlan,
+                    ) {
                         Icon(Icons.Default.Add, contentDescription = "Add plan")
                     }
                 },

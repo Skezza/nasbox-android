@@ -20,6 +20,7 @@ data class ServerEntity(
     val host: String,
     val shareName: String,
     val basePath: String,
+    val domain: String,
     val username: String,
     val credentialAlias: String,
     val lastTestStatus: String? = null,

@@ -28,6 +28,12 @@ object DatabaseProvider {
         }
     }
 
+    private val migration3To4 = object : Migration(3, 4) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE servers ADD COLUMN domain TEXT NOT NULL DEFAULT ''")
+        }
+    }
+
     fun get(context: Context): SMBSyncDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
@@ -35,6 +41,7 @@ object DatabaseProvider {
                 SMBSyncDatabase::class.java,
                 "smbsync.db",
             ).addMigrations(migration1To2, migration2To3)
+                .addMigrations(migration3To4)
                 .build().also { instance = it }
         }
     }

@@ -19,7 +19,9 @@ import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.AndroidKeystoreCredentialStore
 import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.data.smb.SmbClient
+import skezza.smbsync.data.smb.SmbShareRpcEnumerator
 import skezza.smbsync.data.smb.SmbjClient
+import skezza.smbsync.data.smb.SmbjRpcShareEnumerator
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
 import skezza.smbsync.domain.media.ListMediaAlbumsUseCase
 import skezza.smbsync.domain.smb.BrowseSmbDestinationUseCase
@@ -36,6 +38,7 @@ class AppContainer(context: Context) {
     val runRepository: RunRepository = DefaultRunRepository(database.runDao())
     val runLogRepository: RunLogRepository = DefaultRunLogRepository(database.runLogDao())
     private val smbClient: SmbClient = SmbjClient()
+    private val smbShareRpcEnumerator: SmbShareRpcEnumerator = SmbjRpcShareEnumerator()
     private val smbServerDiscoveryScanner: SmbServerDiscoveryScanner = AndroidSmbServerDiscoveryScanner(context)
     private val mediaStoreDataSource: MediaStoreDataSource = AndroidMediaStoreDataSource(context)
 
@@ -51,6 +54,7 @@ class AppContainer(context: Context) {
 
     val browseSmbDestinationUseCase: BrowseSmbDestinationUseCase = BrowseSmbDestinationUseCase(
         smbClient = smbClient,
+        shareRpcEnumerator = smbShareRpcEnumerator,
     )
 
     val listMediaAlbumsUseCase: ListMediaAlbumsUseCase = ListMediaAlbumsUseCase(

@@ -18,6 +18,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class SmbjClient : SmbClient {
+    private data class BrowseAuthCandidate(
+        val mode: String,
+        val context: AuthenticationContext,
+    )
+
     companion object {
         private const val LOG_TAG = "SMBSyncSmb"
         private const val BROWSE_TAG = "SMBSyncBrowse"
@@ -48,20 +53,30 @@ class SmbjClient : SmbClient {
     ): List<String> = withContext(Dispatchers.IO) {
         SMBClient().use { smbClient ->
             smbClient.connect(host).use { connection ->
-                val authContext = AuthenticationContext(username, password.toCharArray(), "")
-                connection.authenticate(authContext).use { session ->
-                    val rawShares = readShareNamesReflectively(session)
-                    val normalizedShares = rawShares
-                        .map { it.trim().trimEnd('$') }
-                        .filter { it.isNotBlank() }
-                        .distinct()
-                        .sorted()
-                    Log.d(
+                var lastError: Throwable? = null
+                for (candidate in browseAuthCandidates(username, password)) {
+                    val attempt = runCatching {
+                        connection.authenticate(candidate.context).use { session ->
+                            val rawShares = readShareNamesReflectively(session)
+                            rawShares
+                                .map { it.trim().trimEnd('$') }
+                                .filter { it.isNotBlank() }
+                                .distinct()
+                                .sorted()
+                        }
+                    }
+                    val shares = attempt.getOrNull()
+                    if (shares != null) {
+                        return@withContext shares
+                    }
+                    lastError = attempt.exceptionOrNull()
+                    Log.w(
                         BROWSE_TAG,
-                        "listShares host=$host rawCount=${rawShares.size} normalizedCount=${normalizedShares.size} values=$normalizedShares",
+                        "listShares authFailed host=$host mode=${candidate.mode} username=${username.trim()}",
+                        lastError,
                     )
-                    normalizedShares
                 }
+                throw lastError ?: IllegalStateException("SMB share listing failed without exception.")
             }
         }
     }
@@ -75,26 +90,57 @@ class SmbjClient : SmbClient {
     ): List<String> = withContext(Dispatchers.IO) {
         SMBClient().use { smbClient ->
             smbClient.connect(host).use { connection ->
-                val authContext = AuthenticationContext(username, password.toCharArray(), "")
-                connection.authenticate(authContext).use { session ->
-                    val share = session.connectShare(shareName)
-                    try {
-                        val diskShare = share as? DiskShare
-                            ?: throw IllegalStateException("Share is not a disk share.")
-                        val queryPath = path.trim().replace('/', '\\').trim('\\')
-                        val directories = diskShare.list(queryPath)
-                            .map { it.fileName }
-                            .filter { it != "." && it != ".." && it.isNotBlank() }
-                        Log.d(
-                            BROWSE_TAG,
-                            "listDirectories host=$host share=$shareName path=$queryPath count=${directories.size} directories=$directories",
-                        )
-                        directories
-                    } finally {
-                        share.close()
+                var lastError: Throwable? = null
+                for (candidate in browseAuthCandidates(username, password)) {
+                    val attempt = runCatching {
+                        connection.authenticate(candidate.context).use { session ->
+                            val share = session.connectShare(shareName)
+                            try {
+                                val diskShare = share as? DiskShare
+                                    ?: throw IllegalStateException("Share is not a disk share.")
+                                val queryPath = path.trim().replace('/', '\\').trim('\\')
+                                val directories = diskShare.list(queryPath)
+                                    .filter { (it.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value) != 0L }
+                                    .map { it.fileName }
+                                    .filter { it != "." && it != ".." && it.isNotBlank() }
+                                directories
+                            } finally {
+                                share.close()
+                            }
+                        }
                     }
+                    val directories = attempt.getOrNull()
+                    if (directories != null) {
+                        return@withContext directories
+                    }
+                    lastError = attempt.exceptionOrNull()
+                    Log.w(
+                        BROWSE_TAG,
+                        "listDirectories authFailed host=$host share=$shareName mode=${candidate.mode} username=${username.trim()}",
+                        lastError,
+                    )
                 }
+                throw lastError ?: IllegalStateException("SMB directory listing failed without exception.")
             }
+        }
+    }
+
+    private fun browseAuthCandidates(username: String, password: String): List<BrowseAuthCandidate> {
+        val trimmedUsername = username.trim()
+        val hasExplicitCredentials = trimmedUsername.isNotBlank() || password.isNotBlank()
+        return if (hasExplicitCredentials) {
+            listOf(
+                BrowseAuthCandidate(
+                    mode = "user",
+                    context = AuthenticationContext(trimmedUsername, password.toCharArray(), ""),
+                ),
+            )
+        } else {
+            listOf(
+                BrowseAuthCandidate(mode = "guest", context = AuthenticationContext.guest()),
+                BrowseAuthCandidate(mode = "anonymous", context = AuthenticationContext.anonymous()),
+                BrowseAuthCandidate(mode = "blank", context = AuthenticationContext("", CharArray(0), "")),
+            )
         }
     }
 

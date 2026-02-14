@@ -12,6 +12,7 @@ import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.data.smb.SmbClient
 import skezza.smbsync.data.smb.SmbConnectionRequest
 import skezza.smbsync.data.smb.SmbConnectionResult
+import skezza.smbsync.data.smb.SmbShareRpcEnumerator
 import skezza.smbsync.data.discovery.SmbServerDiscoveryScanner
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
 import skezza.smbsync.domain.smb.BrowseSmbDestinationUseCase
@@ -57,6 +58,9 @@ class VaultViewModelFactoryTest {
                 username: String,
                 password: String,
             ): List<String> = emptyList()
+        },
+        shareRpcEnumerator = object : SmbShareRpcEnumerator {
+            override suspend fun listSharesViaRpc(host: String, username: String, password: String, domain: String): List<String> = emptyList()
         },
     )
 

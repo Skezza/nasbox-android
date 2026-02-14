@@ -45,6 +45,7 @@ class RunPlanBackupUseCaseTest {
             host = "host",
             shareName = "share",
             basePath = "photos",
+            domain = "",
             username = "user",
             credentialAlias = "alias",
         )
@@ -104,6 +105,7 @@ class RunPlanBackupUseCaseTest {
             host = "host",
             shareName = "share",
             basePath = "photos",
+            domain = "",
             username = "user",
             credentialAlias = "alias",
         )
@@ -146,6 +148,7 @@ class RunPlanBackupUseCaseTest {
                     host = "h",
                     shareName = "sh",
                     basePath = "b",
+                    domain = "",
                     username = "u",
                     credentialAlias = "a",
                 ),
@@ -184,6 +187,7 @@ class RunPlanBackupUseCaseTest {
             host = "host",
             shareName = "share",
             basePath = "photos",
+            domain = "",
             username = "user",
             credentialAlias = "alias",
         )
@@ -332,5 +336,15 @@ class RunPlanBackupUseCaseTest {
         ) {
             uploadedPaths += remotePath
         }
+
+        override suspend fun listShares(host: String, username: String, password: String): List<String> = emptyList()
+
+        override suspend fun listDirectories(
+            host: String,
+            shareName: String,
+            path: String,
+            username: String,
+            password: String,
+        ): List<String> = emptyList()
     }
 }
