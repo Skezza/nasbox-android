@@ -1,8 +1,10 @@
 package skezza.smbsync.data.smb
 
 import com.hierynomus.protocol.commons.buffer.Buffer
+import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.share.DiskShare
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import kotlin.system.measureTimeMillis
@@ -27,6 +29,42 @@ class SmbjClient : SmbClient {
             }
         }
         SmbConnectionResult(latencyMs = latency)
+    }
+
+    override suspend fun listShares(request: SmbConnectionRequest): List<SmbShareEntry> = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    session.listShares()
+                        .map { SmbShareEntry(name = it.netName.orEmpty().trimEnd('\\')) }
+                        .filter { it.name.isNotBlank() }
+                        .sortedBy { it.name.lowercase() }
+                }
+            }
+        }
+    }
+
+    override suspend fun listDirectories(request: SmbBrowseRequest): List<SmbDirectoryEntry> = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    (session.connectShare(request.shareName) as DiskShare).use { diskShare ->
+                        val normalizedPath = request.folderPath.trim().trim('\\').trim('/')
+                        diskShare.list(normalizedPath)
+                            .asSequence()
+                            .filterNot { it.fileName == "." || it.fileName == ".." }
+                            .filter { info ->
+                                info.fileAttributes.contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
+                            }
+                            .map { SmbDirectoryEntry(name = it.fileName) }
+                            .sortedBy { it.name.lowercase() }
+                            .toList()
+                    }
+                }
+            }
+        }
     }
 }
 

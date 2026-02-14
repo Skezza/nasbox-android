@@ -20,12 +20,15 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -179,8 +182,10 @@ fun ServerEditorScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.editorState.collectAsState()
+    val browserState by viewModel.browserState.collectAsState()
     val message by viewModel.message.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var showBrowserDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(serverId) {
         viewModel.loadServerForEdit(serverId)
@@ -260,6 +265,28 @@ fun ServerEditorScreen(
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
                 }
             }
+
+            ElevatedButton(onClick = {
+                showBrowserDialog = true
+                viewModel.browseSharesFromEditor()
+            }) {
+                Text("Browse shares & folders")
+            }
+        }
+
+        if (showBrowserDialog) {
+            SmbBrowserDialog(
+                browserState = browserState,
+                editorState = state,
+                onDismiss = {
+                    showBrowserDialog = false
+                    viewModel.clearBrowserState()
+                },
+                onRefreshShares = viewModel::browseSharesFromEditor,
+                onSelectShare = { share -> viewModel.browseFoldersInShare(share, "") },
+                onOpenFolder = { share, path -> viewModel.browseFoldersInShare(share, path) },
+                onApplySelection = { share, path -> viewModel.applyBrowserSelection(share, path) },
+            )
         }
     }
 }
@@ -284,6 +311,114 @@ private fun ServerField(
             when {
                 error != null -> Text(error)
                 !helperText.isNullOrBlank() -> Text(helperText)
+            }
+        },
+    )
+}
+
+@Composable
+private fun SmbBrowserDialog(
+    browserState: SmbBrowserUiState,
+    editorState: ServerEditorUiState,
+    onDismiss: () -> Unit,
+    onRefreshShares: () -> Unit,
+    onSelectShare: (String) -> Unit,
+    onOpenFolder: (String, String) -> Unit,
+    onApplySelection: (String, String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pick a share home") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Explore your SMB space, then apply a share and optional folder to prefill this server.")
+                if (browserState.isLoading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                if (browserState.errorMessage != null) {
+                    Text(browserState.errorMessage)
+                }
+
+                Text("Shares")
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 130.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(browserState.shares, key = { it }) { share ->
+                        AssistChip(
+                            onClick = { onSelectShare(share) },
+                            label = { Text(if (share == browserState.selectedShare) "✓ $share" else share) },
+                        )
+                    }
+                }
+
+                if (browserState.selectedShare.isNotBlank()) {
+                    HorizontalDivider()
+                    Text("Folders in ${browserState.selectedShare}")
+                    val pathSegments = browserState.selectedPath.split('/').filter { it.isNotBlank() }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AssistChip(onClick = { onOpenFolder(browserState.selectedShare, "") }, label = { Text("/") })
+                        var cumulative = ""
+                        pathSegments.forEach { segment ->
+                            cumulative = if (cumulative.isBlank()) segment else "$cumulative/$segment"
+                            AssistChip(
+                                onClick = { onOpenFolder(browserState.selectedShare, cumulative) },
+                                label = { Text(segment) },
+                            )
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 170.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(browserState.folders, key = { it }) { folder ->
+                            val nextPath = listOf(browserState.selectedPath, folder)
+                                .filter { it.isNotBlank() }
+                                .joinToString("/")
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenFolder(browserState.selectedShare, nextPath) }
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text("📁 $folder")
+                                TextButton(onClick = { onApplySelection(browserState.selectedShare, nextPath) }) {
+                                    Text("Use")
+                                }
+                            }
+                        }
+                    }
+                }
+                val selectedShare = browserState.selectedShare.ifBlank { editorState.shareName }
+                val selectedPath = browserState.selectedPath.ifBlank { editorState.basePath }
+                if (selectedShare.isNotBlank()) {
+                    Text("Will use: //${editorState.host}/$selectedShare/$selectedPath")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val share = browserState.selectedShare.ifBlank { editorState.shareName }
+                    if (share.isNotBlank()) {
+                        onApplySelection(share, browserState.selectedPath)
+                    }
+                    onDismiss()
+                },
+            ) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onRefreshShares, enabled = !browserState.isLoading) {
+                    Text("Refresh")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
             }
         },
     )

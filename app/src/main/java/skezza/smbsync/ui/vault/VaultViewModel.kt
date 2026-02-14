@@ -17,6 +17,7 @@ import skezza.smbsync.data.discovery.DiscoveredSmbServer
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbPathUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 import skezza.smbsync.domain.vault.ServerInput
 import skezza.smbsync.domain.vault.ServerValidationResult
@@ -26,6 +27,7 @@ class VaultViewModel(
     private val serverRepository: ServerRepository,
     private val credentialStore: CredentialStore,
     private val testSmbConnectionUseCase: TestSmbConnectionUseCase,
+    private val browseSmbPathUseCase: BrowseSmbPathUseCase,
     private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
 ) : ViewModel() {
@@ -60,11 +62,15 @@ class VaultViewModel(
     private val _discoveryState = MutableStateFlow(DiscoveryUiState())
     val discoveryState: StateFlow<DiscoveryUiState> = _discoveryState.asStateFlow()
 
+    private val _browserState = MutableStateFlow(SmbBrowserUiState())
+    val browserState: StateFlow<SmbBrowserUiState> = _browserState.asStateFlow()
+
     fun clearMessage() {
         _message.value = null
     }
 
     fun loadServerForEdit(serverId: Long?) {
+        clearBrowserState()
         if (serverId == null) {
             val discovery = pendingDiscoverySelection
             pendingDiscoverySelection = null
@@ -207,6 +213,85 @@ class VaultViewModel(
         }
     }
 
+
+    fun browseSharesFromEditor() {
+        viewModelScope.launch {
+            val current = _editorState.value
+            if (current.host.isBlank() || current.username.isBlank() || current.password.isBlank()) {
+                _message.value = "Enter host, username, and password before browsing."
+                return@launch
+            }
+
+            _browserState.value = SmbBrowserUiState(isLoading = true)
+            runCatching {
+                browseSmbPathUseCase.listShares(
+                    host = current.host,
+                    username = current.username,
+                    password = current.password,
+                )
+            }.onSuccess { shares ->
+                _browserState.value = SmbBrowserUiState(shares = shares)
+                if (shares.isEmpty()) {
+                    _message.value = "Connected, but no shares were visible with this account."
+                }
+            }.onFailure {
+                _browserState.value = SmbBrowserUiState(errorMessage = "Unable to load shares.")
+                _message.value = it.message ?: "Unable to browse SMB shares."
+            }
+        }
+    }
+
+    fun browseFoldersInShare(shareName: String, folderPath: String) {
+        viewModelScope.launch {
+            val current = _editorState.value
+            _browserState.value = _browserState.value.copy(
+                isLoading = true,
+                selectedShare = shareName,
+                selectedPath = folderPath,
+                errorMessage = null,
+            )
+            runCatching {
+                browseSmbPathUseCase.listDirectories(
+                    host = current.host,
+                    shareName = shareName,
+                    username = current.username,
+                    password = current.password,
+                    folderPath = folderPath,
+                )
+            }.onSuccess { folders ->
+                _browserState.value = _browserState.value.copy(
+                    isLoading = false,
+                    folders = folders,
+                    selectedShare = shareName,
+                    selectedPath = folderPath,
+                    errorMessage = null,
+                )
+            }.onFailure {
+                _browserState.value = _browserState.value.copy(
+                    isLoading = false,
+                    folders = emptyList(),
+                    errorMessage = "Unable to read this folder.",
+                )
+                _message.value = it.message ?: "Unable to browse folders."
+            }
+        }
+    }
+
+    fun applyBrowserSelection(shareName: String, folderPath: String) {
+        _editorState.value = _editorState.value.copy(
+            shareName = shareName,
+            basePath = folderPath,
+        )
+        _browserState.value = _browserState.value.copy(
+            selectedShare = shareName,
+            selectedPath = folderPath,
+        )
+    }
+
+    fun clearBrowserState() {
+        _browserState.value = SmbBrowserUiState()
+    }
+
     fun discoverServers() {
         viewModelScope.launch {
             _discoveryState.value = _discoveryState.value.copy(isScanning = true, errorMessage = null)
@@ -262,6 +347,7 @@ class VaultViewModel(
             serverRepository: ServerRepository,
             credentialStore: CredentialStore,
             testSmbConnectionUseCase: TestSmbConnectionUseCase,
+            browseSmbPathUseCase: BrowseSmbPathUseCase,
             discoverSmbServersUseCase: DiscoverSmbServersUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -271,6 +357,7 @@ class VaultViewModel(
                         serverRepository = serverRepository,
                         credentialStore = credentialStore,
                         testSmbConnectionUseCase = testSmbConnectionUseCase,
+                        browseSmbPathUseCase = browseSmbPathUseCase,
                         discoverSmbServersUseCase = discoverSmbServersUseCase,
                     ) as T
                 }
@@ -331,5 +418,15 @@ data class ServerEditorUiState(
 data class DiscoveryUiState(
     val isScanning: Boolean = false,
     val servers: List<DiscoveredSmbServer> = emptyList(),
+    val errorMessage: String? = null,
+)
+
+
+data class SmbBrowserUiState(
+    val isLoading: Boolean = false,
+    val shares: List<String> = emptyList(),
+    val selectedShare: String = "",
+    val selectedPath: String = "",
+    val folders: List<String> = emptyList(),
     val errorMessage: String? = null,
 )
