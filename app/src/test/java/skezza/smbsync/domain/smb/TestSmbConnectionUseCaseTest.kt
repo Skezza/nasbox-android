@@ -11,6 +11,8 @@ import skezza.smbsync.data.db.ServerEntity
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.data.smb.SmbClient
+import skezza.smbsync.data.smb.SmbBrowseRequest
+import skezza.smbsync.data.smb.SmbBrowseResult
 import skezza.smbsync.data.smb.SmbConnectionRequest
 import skezza.smbsync.data.smb.SmbConnectionResult
 
@@ -81,6 +83,10 @@ class TestSmbConnectionUseCaseTest {
         override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult {
             error?.let { throw it }
             return checkNotNull(result)
+        }
+
+        override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult {
+            throw UnsupportedOperationException("Not needed for this test")
         }
     }
 

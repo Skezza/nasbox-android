@@ -17,7 +17,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -25,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -247,6 +251,71 @@ fun ServerEditorScreen(
                 isPassword = true,
             ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
+            }
+
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Browse SMB paths")
+                    Text("Playful shortcut: explore shares and folders to prefill Share + Base path.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ElevatedButton(
+                            onClick = viewModel::browseNetwork,
+                            enabled = !state.browser.isLoading,
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null)
+                            Text(
+                                if (state.browser.level == skezza.smbsync.data.smb.SmbBrowseLevel.SHARES) "Browse shares" else "Refresh",
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                        ElevatedButton(
+                            onClick = viewModel::browseUp,
+                            enabled = !state.browser.isLoading &&
+                                (state.browser.level != skezza.smbsync.data.smb.SmbBrowseLevel.SHARES || state.browser.currentPath.isNotBlank()),
+                        ) {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null)
+                            Text("Up", modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+
+                    if (state.browser.level == skezza.smbsync.data.smb.SmbBrowseLevel.FOLDERS) {
+                        Text("Now browsing: /${state.shareName}/${state.browser.currentPath}")
+                    }
+
+                    if (state.browser.isLoading) {
+                        Text("Loading SMB directory map...")
+                    }
+
+                    if (!state.browser.errorMessage.isNullOrBlank()) {
+                        Text(state.browser.errorMessage!!)
+                    }
+
+                    if (!state.browser.isLoading && state.browser.entries.isEmpty()) {
+                        Text("Nothing to show here yet. Try another level or refresh.")
+                    }
+
+                    state.browser.entries.forEach { entry ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.browseEntry(entry) }
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(entry.name)
+                            IconButton(onClick = { viewModel.browseEntry(entry) }) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Open")
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

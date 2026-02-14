@@ -1,6 +1,7 @@
 package skezza.smbsync.data.smb
 
 import com.hierynomus.protocol.commons.buffer.Buffer
+import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import java.net.SocketTimeoutException
@@ -28,6 +29,51 @@ class SmbjClient : SmbClient {
         }
         SmbConnectionResult(latencyMs = latency)
     }
+
+    override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    if (request.shareName.isBlank()) {
+                        val shares = connection.listShares()
+                            .map { it.netName.trimEnd('\u0000') }
+                            .sortedBy { it.lowercase() }
+                        SmbBrowseResult(
+                            level = SmbBrowseLevel.SHARES,
+                            entries = shares.map { share ->
+                                SmbBrowseEntry(name = share, path = "")
+                            },
+                        )
+                    } else {
+                        val normalizedPath = normalizePath(request.path)
+                        val share = session.connectShare(request.shareName) as DiskShare
+                        share.use {
+                            val folders = share.list(normalizedPath)
+                                .mapNotNull { info ->
+                                    val name = info.fileName
+                                    if (name == "." || name == "..") {
+                                        null
+                                    } else {
+                                        SmbBrowseEntry(
+                                            name = name,
+                                            path = joinPath(normalizedPath, name),
+                                        )
+                                    }
+                                }
+                                .sortedBy { it.name.lowercase() }
+                            SmbBrowseResult(level = SmbBrowseLevel.FOLDERS, entries = folders)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun normalizePath(path: String): String = path.trim().trim('/').trim('\\')
+
+    private fun joinPath(basePath: String, child: String): String =
+        if (basePath.isBlank()) child else "$basePath/$child"
 }
 
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {

@@ -16,7 +16,10 @@ import skezza.smbsync.data.db.ServerEntity
 import skezza.smbsync.data.discovery.DiscoveredSmbServer
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
+import skezza.smbsync.data.smb.SmbBrowseLevel
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbLocationUseCase
+import skezza.smbsync.domain.smb.SmbBrowserUiEntry
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 import skezza.smbsync.domain.vault.ServerInput
 import skezza.smbsync.domain.vault.ServerValidationResult
@@ -27,6 +30,7 @@ class VaultViewModel(
     private val credentialStore: CredentialStore,
     private val testSmbConnectionUseCase: TestSmbConnectionUseCase,
     private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+    private val browseSmbLocationUseCase: BrowseSmbLocationUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
 ) : ViewModel() {
 
@@ -207,6 +211,92 @@ class VaultViewModel(
         }
     }
 
+    fun browseNetwork() {
+        browseTo(shareOverride = null, pathOverride = null)
+    }
+
+    fun browseEntry(entry: SmbBrowserUiEntry) {
+        val browser = _editorState.value.browser
+        if (browser.level == SmbBrowseLevel.SHARES) {
+            _editorState.value = _editorState.value.copy(shareName = entry.name, basePath = "")
+            browseTo(shareOverride = entry.name, pathOverride = "")
+        } else {
+            _editorState.value = _editorState.value.copy(basePath = entry.path)
+            browseTo(pathOverride = entry.path)
+        }
+    }
+
+    fun browseUp() {
+        val state = _editorState.value
+        val browser = state.browser
+        if (browser.level == SmbBrowseLevel.SHARES) {
+            return
+        }
+
+        if (browser.currentPath.isBlank()) {
+            _editorState.value = state.copy(shareName = "", basePath = "")
+            browseTo(shareOverride = "", pathOverride = "")
+            return
+        }
+
+        val parent = browser.currentPath.substringBeforeLast('/', "")
+        _editorState.value = state.copy(basePath = parent)
+        browseTo(pathOverride = parent)
+    }
+
+    private fun browseTo(
+        shareOverride: String?,
+        pathOverride: String?,
+    ) {
+        val current = _editorState.value
+        val resolvedShare = shareOverride ?: current.shareName
+        val resolvedPath = pathOverride ?: current.browser.currentPath
+
+        if (current.host.isBlank() || current.username.isBlank() || current.password.isBlank()) {
+            _message.value = "Enter host, username, and password before browsing SMB paths."
+            return
+        }
+
+        _editorState.value = current.copy(
+            browser = current.browser.copy(
+                isLoading = true,
+                errorMessage = null,
+            ),
+        )
+
+        viewModelScope.launch {
+            val result = browseSmbLocationUseCase(
+                host = current.host,
+                shareName = resolvedShare,
+                currentPath = resolvedPath,
+                username = current.username,
+                password = current.password,
+            )
+
+            if (!result.success) {
+                _editorState.value = _editorState.value.copy(
+                    browser = _editorState.value.browser.copy(
+                        isLoading = false,
+                        errorMessage = result.message ?: "Unable to browse SMB paths.",
+                    ),
+                )
+                return@launch
+            }
+
+            _editorState.value = _editorState.value.copy(
+                host = result.host,
+                shareName = result.shareName,
+                browser = _editorState.value.browser.copy(
+                    isLoading = false,
+                    level = result.level,
+                    currentPath = result.currentPath,
+                    entries = result.entries,
+                    errorMessage = null,
+                ),
+            )
+        }
+    }
+
     fun discoverServers() {
         viewModelScope.launch {
             _discoveryState.value = _discoveryState.value.copy(isScanning = true, errorMessage = null)
@@ -263,6 +353,7 @@ class VaultViewModel(
             credentialStore: CredentialStore,
             testSmbConnectionUseCase: TestSmbConnectionUseCase,
             discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+            browseSmbLocationUseCase: BrowseSmbLocationUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(VaultViewModel::class.java)) {
@@ -272,6 +363,7 @@ class VaultViewModel(
                         credentialStore = credentialStore,
                         testSmbConnectionUseCase = testSmbConnectionUseCase,
                         discoverSmbServersUseCase = discoverSmbServersUseCase,
+                        browseSmbLocationUseCase = browseSmbLocationUseCase,
                     ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
@@ -305,6 +397,14 @@ data class ServerListItemUiState(
     val isTesting: Boolean = false,
 )
 
+data class SmbBrowserUiState(
+    val isLoading: Boolean = false,
+    val level: SmbBrowseLevel = SmbBrowseLevel.SHARES,
+    val currentPath: String = "",
+    val entries: List<SmbBrowserUiEntry> = emptyList(),
+    val errorMessage: String? = null,
+)
+
 data class ServerEditorUiState(
     val editingServerId: Long? = null,
     val name: String = "",
@@ -315,6 +415,7 @@ data class ServerEditorUiState(
     val password: String = "",
     val validation: ServerValidationResult = ServerValidationResult(),
     val isTestingConnection: Boolean = false,
+    val browser: SmbBrowserUiState = SmbBrowserUiState(),
 ) {
     fun updateField(field: ServerEditorField, value: String): ServerEditorUiState {
         return when (field) {
