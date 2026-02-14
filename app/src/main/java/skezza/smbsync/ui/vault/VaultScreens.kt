@@ -407,6 +407,12 @@ private fun BrowseDestinationDialog(
                 if (!state.errorMessage.isNullOrBlank()) {
                     Text(state.errorMessage)
                 }
+                if (!state.isLoading && state.errorMessage.isNullOrBlank() && state.selectedShare.isBlank() && state.shares.isEmpty()) {
+                    Text("No shares returned yet. Tap Refresh to retry.")
+                }
+                if (!state.isLoading && state.errorMessage.isNullOrBlank() && state.selectedShare.isNotBlank() && state.directories.isEmpty()) {
+                    Text("No folders found at this location.")
+                }
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 260.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),

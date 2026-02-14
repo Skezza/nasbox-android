@@ -1,5 +1,6 @@
 package skezza.smbsync.data.smb
 
+import android.util.Log
 import com.hierynomus.protocol.commons.buffer.Buffer
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
@@ -39,11 +40,13 @@ class SmbjClient : SmbClient {
                 val authContext = AuthenticationContext(username, password.toCharArray(), "")
                 connection.authenticate(authContext).use { session ->
                     val rawShares = readShareNamesReflectively(session)
-                    rawShares
+                    val normalizedShares = rawShares
                         .map { it.trim().trimEnd('$') }
                         .filter { it.isNotBlank() }
                         .distinct()
                         .sorted()
+                    Log.d(TAG, "listShares host=$host rawCount=${rawShares.size} normalizedCount=${normalizedShares.size} values=$normalizedShares")
+                    normalizedShares
                 }
             }
         }
@@ -65,9 +68,11 @@ class SmbjClient : SmbClient {
                         val diskShare = share as? DiskShare
                             ?: throw IllegalStateException("Share is not a disk share.")
                         val queryPath = path.trim().replace('/', '\\').trim('\\')
-                        diskShare.list(queryPath)
+                        val directories = diskShare.list(queryPath)
                             .map { it.fileName }
                             .filter { it != "." && it != ".." && it.isNotBlank() }
+                        Log.d(TAG, "listDirectories host=$host share=$shareName path=$queryPath count=${directories.size} directories=$directories")
+                        directories
                     } finally {
                         share.close()
                     }
@@ -95,7 +100,13 @@ class SmbjClient : SmbClient {
                 }
                 else -> emptyList()
             }
+        }.onFailure {
+            Log.w(TAG, "readShareNamesReflectively failed sessionClass=${session.javaClass.name}", it)
         }.getOrDefault(emptyList())
+    }
+
+    companion object {
+        private const val TAG = "SMBSyncBrowse"
     }
 }
 
