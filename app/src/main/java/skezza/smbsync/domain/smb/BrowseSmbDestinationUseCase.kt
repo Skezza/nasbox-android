@@ -1,16 +1,22 @@
 package skezza.smbsync.domain.smb
 
 import skezza.smbsync.data.smb.SmbClient
+import skezza.smbsync.data.smb.SmbConnectionFailure
+import skezza.smbsync.data.smb.SmbShareRpcEnumerator
 import skezza.smbsync.data.smb.toSmbConnectionFailure
 
 class BrowseSmbDestinationUseCase(
     private val smbClient: SmbClient,
+    private val shareRpcEnumerator: SmbShareRpcEnumerator,
 ) {
     suspend fun listShares(
         host: String,
         username: String,
         password: String,
+        domain: String,
     ): SmbBrowseResult<List<String>> {
+        val trimmedUsername = username.trim()
+        val trimmedDomain = domain.trim()
         val parsedTarget = SmbTargetParser.parse(host, "")
         if (parsedTarget is ParsedSmbTargetResult.Error) {
             return SmbBrowseResult.Failure(
@@ -20,16 +26,49 @@ class BrowseSmbDestinationUseCase(
         }
         val target = (parsedTarget as ParsedSmbTargetResult.Success).target
 
-        return runCatching {
-            smbClient.listShares(
+        val rpcResult = runCatching {
+            shareRpcEnumerator.listSharesViaRpc(
                 host = target.host,
-                username = username.trim(),
+                username = trimmedUsername,
                 password = password,
+                domain = trimmedDomain,
             )
-        }.fold(
-            onSuccess = { SmbBrowseResult.Success(it.sorted()) },
-            onFailure = { it.toBrowseFailure() },
-        )
+        }
+        val rpcShares = rpcResult.getOrNull().orEmpty()
+        val rpcException = rpcResult.exceptionOrNull()
+        val shouldFallback = rpcShares.isEmpty()
+        val fallbackResult = if (shouldFallback) {
+            runCatching {
+                smbClient.listShares(
+                    host = target.host,
+                    username = trimmedUsername,
+                    password = password,
+                )
+            }
+        } else {
+            null
+        }
+        val fallbackShares = fallbackResult?.getOrNull().orEmpty()
+        if (shouldFallback) {
+            val fallbackException = fallbackResult?.exceptionOrNull()
+        }
+
+        val mergedShares = (rpcShares + fallbackShares)
+            .map { it.trim().trimEnd('$').trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+
+        if (mergedShares.isNotEmpty()) {
+            return SmbBrowseResult.Success(mergedShares)
+        }
+
+        val fallbackException = fallbackResult?.exceptionOrNull()
+        return when {
+            fallbackResult?.isFailure == true && fallbackException != null -> fallbackException.toBrowseFailure()
+            rpcResult.isFailure && rpcException != null -> rpcException.toBrowseFailure()
+            else -> SmbBrowseResult.Success(emptyList())
+        }
     }
 
     suspend fun listDirectories(
@@ -69,6 +108,10 @@ class BrowseSmbDestinationUseCase(
     }
 
     fun normalizePath(path: String): String = path.trim().replace('\\', '/').trim('/').replace("//", "/")
+
+    companion object {
+        private const val TAG = "SMBSyncBrowse"
+    }
 }
 
 sealed class SmbBrowseResult<out T> {
@@ -81,40 +124,43 @@ sealed class SmbBrowseResult<out T> {
 }
 
 private fun Throwable.toBrowseFailure(): SmbBrowseResult.Failure {
-    val mapped = toSmbConnectionFailure()
+    val mapped = when (this) {
+        is SmbConnectionFailure -> this
+        else -> toSmbConnectionFailure()
+    }
     return when (mapped) {
-        is skezza.smbsync.data.smb.SmbConnectionFailure.HostUnreachable -> SmbBrowseResult.Failure(
+        is SmbConnectionFailure.HostUnreachable -> SmbBrowseResult.Failure(
             message = "Unable to reach the host.",
             recoveryHint = "Check host and Wi-Fi connectivity.",
             technicalDetail = message,
         )
 
-        is skezza.smbsync.data.smb.SmbConnectionFailure.AuthenticationFailed -> SmbBrowseResult.Failure(
+        is SmbConnectionFailure.AuthenticationFailed -> SmbBrowseResult.Failure(
             message = "Authentication failed.",
             recoveryHint = "Verify username and password.",
             technicalDetail = message,
         )
 
-        is skezza.smbsync.data.smb.SmbConnectionFailure.ShareNotFound -> SmbBrowseResult.Failure(
+        is SmbConnectionFailure.ShareNotFound -> SmbBrowseResult.Failure(
             message = "Share not found.",
             recoveryHint = "Choose a different share.",
             technicalDetail = message,
         )
 
-        is skezza.smbsync.data.smb.SmbConnectionFailure.RemotePermissionDenied -> SmbBrowseResult.Failure(
+        is SmbConnectionFailure.RemotePermissionDenied -> SmbBrowseResult.Failure(
             message = "Permission denied.",
             recoveryHint = "Ensure the account can browse this location.",
             technicalDetail = message,
         )
 
-        is skezza.smbsync.data.smb.SmbConnectionFailure.Timeout,
-        is skezza.smbsync.data.smb.SmbConnectionFailure.NetworkInterruption -> SmbBrowseResult.Failure(
+        is SmbConnectionFailure.Timeout,
+        is SmbConnectionFailure.NetworkInterruption -> SmbBrowseResult.Failure(
             message = "Browse timed out or was interrupted.",
             recoveryHint = "Retry on a stable network.",
             technicalDetail = message,
         )
 
-        is skezza.smbsync.data.smb.SmbConnectionFailure.Unknown -> SmbBrowseResult.Failure(
+        is SmbConnectionFailure.Unknown -> SmbBrowseResult.Failure(
             message = "Unable to browse SMB destination.",
             recoveryHint = "Review settings and try again.",
             technicalDetail = message,
