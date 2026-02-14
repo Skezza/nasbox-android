@@ -330,7 +330,7 @@ internal object PathRenderer {
     internal fun sanitizeSegment(value: String): String {
         val trimmed = value.trim().ifBlank { "unknown" }
         return trimmed
-            .replace(Regex("[<>:\\\\"/|?*]"), "_")
+            .replace(Regex("[<>:\"/\\|?*]"), "_")
             .replace(Regex("[\\p{Cntrl}]"), "_")
     }
 }
