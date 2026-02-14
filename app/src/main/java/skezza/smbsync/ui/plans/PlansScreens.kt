@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -198,7 +197,6 @@ fun PlanEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .imePadding()
                 .verticalScroll(editorScrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -208,6 +206,7 @@ fun PlanEditorScreen(
                 label = { Text("Plan name") },
                 isError = editorState.validation.nameError != null,
                 supportingText = { editorState.validation.nameError?.let { Text(it) } },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -248,6 +247,7 @@ fun PlanEditorScreen(
                         label = { Text("Folder URI/path") },
                         supportingText = { editorState.validation.folderPathError?.let { Text(it) } },
                         isError = editorState.validation.folderPathError != null,
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -298,6 +298,7 @@ fun PlanEditorScreen(
                         Text(editorState.validation.templateError ?: "Example: {year}/{month}/{album}")
                     },
                     isError = editorState.validation.templateError != null,
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -309,6 +310,7 @@ fun PlanEditorScreen(
                         Text(editorState.validation.filenamePatternError ?: "Example: {timestamp}_{mediaId}.{ext}")
                     },
                     isError = editorState.validation.filenamePatternError != null,
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -373,6 +375,7 @@ private fun AlbumSelector(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             isError = error != null,
             supportingText = { error?.let { Text(it) } },
+            singleLine = true,
             modifier = Modifier.menuAnchor().fillMaxWidth(),
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -408,6 +411,7 @@ private fun ServerSelector(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             isError = error != null,
             supportingText = { error?.let { Text(it) } },
+            singleLine = true,
             modifier = Modifier.menuAnchor().fillMaxWidth(),
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
