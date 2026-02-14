@@ -63,10 +63,28 @@ fun PlansScreen(
     onRunPlan: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val plans by viewModel.plans.collectAsState()
     val message by viewModel.message.collectAsState()
     val activeRunPlanIds by viewModel.activeRunPlanIds.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var pendingRunPlanId by remember { mutableStateOf<Long?>(null) }
+
+    val runPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_IMAGES
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
+    val runPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val planId = pendingRunPlanId
+        pendingRunPlanId = null
+        if (granted && planId != null) {
+            onRunPlan(planId)
+        } else if (!granted) {
+            viewModel.showMessage("Photo permission is required to run album backups.")
+        }
+    }
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
@@ -133,7 +151,18 @@ fun PlansScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
                                 Button(
-                                    onClick = { onRunPlan(plan.planId) },
+                                    onClick = {
+                                        val hasPermission = ContextCompat.checkSelfPermission(
+                                            context,
+                                            runPermission,
+                                        ) == PackageManager.PERMISSION_GRANTED
+                                        if (hasPermission) {
+                                            onRunPlan(plan.planId)
+                                        } else {
+                                            pendingRunPlanId = plan.planId
+                                            runPermissionLauncher.launch(runPermission)
+                                        }
+                                    },
                                     enabled = plan.enabled && !activeRunPlanIds.contains(plan.planId),
                                 ) {
                                     Text(if (activeRunPlanIds.contains(plan.planId)) "Running..." else "Run now")

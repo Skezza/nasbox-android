@@ -89,6 +89,10 @@ class PlansViewModel(
         _message.value = null
     }
 
+    fun showMessage(message: String) {
+        _message.value = message
+    }
+
     fun setMediaPermissionGranted(granted: Boolean) {
         _hasMediaPermission.value = granted
         if (granted) refreshAlbums() else _albums.value = emptyList()

@@ -142,7 +142,23 @@ class RunPlanBackupUseCase(
             password = password,
         )
 
-        val items = mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum)
+        val items = runCatching { mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum) }
+            .getOrElse { throwable ->
+                val message = "Unable to scan local media. Check photo permission and album availability."
+                log(SEVERITY_ERROR, message, throwable.message)
+                return@withContext finalizeRun(
+                    runId = runId,
+                    planId = planId,
+                    startedAt = startedAt,
+                    scanned = 0,
+                    uploaded = 0,
+                    skipped = 0,
+                    failed = 1,
+                    summaryError = message,
+                    status = STATUS_FAILED,
+                    log = ::log,
+                )
+            }
         var uploadedCount = 0
         var skippedCount = 0
         var failedCount = 0
@@ -186,15 +202,25 @@ class RunPlanBackupUseCase(
             }
 
             if (uploadResult.isSuccess) {
-                uploadedCount += 1
-                backupRecordRepository.create(
-                    BackupRecordEntity(
-                        planId = planId,
-                        mediaItemId = item.mediaId,
-                        remotePath = remotePath,
-                        uploadedAtEpochMs = nowEpochMs(),
-                    ),
-                )
+                val recordResult = runCatching {
+                    backupRecordRepository.create(
+                        BackupRecordEntity(
+                            planId = planId,
+                            mediaItemId = item.mediaId,
+                            remotePath = remotePath,
+                            uploadedAtEpochMs = nowEpochMs(),
+                        ),
+                    )
+                }
+                if (recordResult.isSuccess) {
+                    uploadedCount += 1
+                } else {
+                    failedCount += 1
+                    val recordError = recordResult.exceptionOrNull()
+                    val message = "Uploaded item ${item.mediaId}, but failed to persist backup proof."
+                    summaryError = summaryError ?: message
+                    log(SEVERITY_ERROR, message, recordError?.message)
+                }
             } else {
                 failedCount += 1
                 val throwable = uploadResult.exceptionOrNull()

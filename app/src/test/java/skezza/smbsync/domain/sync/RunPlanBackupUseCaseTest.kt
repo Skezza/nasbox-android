@@ -85,6 +85,48 @@ class RunPlanBackupUseCaseTest {
         assertTrue(logRepo.logs.any { it.message == "Run finished" })
     }
 
+
+    @Test
+    fun invoke_returnsFailedWhenMediaScanThrows() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val server = ServerEntity(
+            serverId = 20,
+            name = "NAS",
+            host = "host",
+            shareName = "share",
+            basePath = "photos",
+            username = "user",
+            credentialAlias = "alias",
+        )
+
+        val useCase = RunPlanBackupUseCase(
+            planRepository = FakePlanRepository(plan),
+            serverRepository = FakeServerRepository(server),
+            backupRecordRepository = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepository = FakeRunRepository(),
+            runLogRepository = FakeRunLogRepository(),
+            credentialStore = FakeCredentialStore("pw"),
+            mediaStoreDataSource = FakeMediaStoreDataSource(emptyList(), throwOnScan = true),
+            smbClient = FakeSmbClient(),
+            nowEpochMs = { 1000L },
+        )
+
+        val result = useCase(plan.planId)
+
+        assertEquals("FAILED", result.status)
+        assertEquals(0, result.uploadedCount)
+        assertEquals(0, result.skippedCount)
+        assertEquals(1, result.failedCount)
+    }
+
     @Test
     fun sanitizeSegment_replacesIllegalCharacters() {
         val sanitized = PathRenderer.sanitizeSegment("cam<era>:name?.jpg")
@@ -164,9 +206,13 @@ class RunPlanBackupUseCaseTest {
 
     private class FakeMediaStoreDataSource(
         private val items: List<MediaImageItem>,
+        private val throwOnScan: Boolean = false,
     ) : MediaStoreDataSource {
         override suspend fun listAlbums(): List<MediaAlbum> = emptyList()
-        override suspend fun listImagesForAlbum(bucketId: String): List<MediaImageItem> = items
+        override suspend fun listImagesForAlbum(bucketId: String): List<MediaImageItem> {
+            if (throwOnScan) error("permission denied")
+            return items
+        }
         override suspend fun openImageStream(mediaId: String): InputStream? = ByteArrayInputStream(byteArrayOf(1, 2, 3))
         override fun imageContentUri(mediaId: String) = android.net.Uri.EMPTY
     }
