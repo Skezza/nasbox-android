@@ -415,7 +415,7 @@ private fun BrowseDestinationDialog(
                 }
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 260.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     if (state.selectedShare.isBlank()) {
                         items(state.shares, key = { it }) { share ->
@@ -423,7 +423,7 @@ private fun BrowseDestinationDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onSelectShare(share) }
-                                    .padding(vertical = 6.dp),
+                                    .padding(vertical = 2.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(share)
@@ -436,7 +436,7 @@ private fun BrowseDestinationDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onOpenDirectory(directory) }
-                                    .padding(vertical = 6.dp),
+                                    .padding(vertical = 2.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(directory)
