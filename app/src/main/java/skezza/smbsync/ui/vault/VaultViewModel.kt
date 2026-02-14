@@ -219,18 +219,21 @@ class VaultViewModel(
             _message.value = "Enter host, username, and password before browsing destination."
             return
         }
+        val normalizedShare = normalizeShare(editor.shareName)
+        val normalizedBasePath = browseSmbDestinationUseCase.normalizePath(editor.basePath)
+
         _browseState.value = SmbBrowseUiState(
             isVisible = true,
             isLoading = true,
-            selectedShare = normalizeShare(editor.shareName),
-            currentPath = browseSmbDestinationUseCase.normalizePath(editor.basePath),
+            selectedShare = normalizedShare,
+            currentPath = normalizedBasePath,
         )
 
         viewModelScope.launch {
-            if (editor.shareName.isBlank()) {
+            if (normalizedShare.isBlank()) {
                 loadBrowseShares()
             } else {
-                loadBrowseDirectories(normalizeShare(editor.shareName), browseSmbDestinationUseCase.normalizePath(editor.basePath))
+                loadBrowseDirectories(normalizedShare, normalizedBasePath)
             }
         }
     }
