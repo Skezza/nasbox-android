@@ -59,6 +59,7 @@ class RunPlanBackupUseCase(
 
         val plan = planRepository.getPlan(planId)
         if (plan == null) {
+            log(SEVERITY_ERROR, "Run aborted: plan does not exist", "planId=$planId")
             return@withContext finalizeRun(
                 runId = runId,
                 planId = planId,
@@ -74,6 +75,7 @@ class RunPlanBackupUseCase(
         }
 
         if (!plan.enabled) {
+            log(SEVERITY_ERROR, "Run aborted: plan is disabled", "planId=${plan.planId}")
             return@withContext finalizeRun(
                 runId = runId,
                 planId = planId,
@@ -89,6 +91,7 @@ class RunPlanBackupUseCase(
         }
 
         if (plan.sourceType != SOURCE_TYPE_ALBUM) {
+            log(SEVERITY_ERROR, "Run aborted: unsupported source type", "sourceType=${plan.sourceType}")
             return@withContext finalizeRun(
                 runId = runId,
                 planId = planId,
@@ -105,6 +108,7 @@ class RunPlanBackupUseCase(
 
         val server = serverRepository.getServer(plan.serverId)
         if (server == null) {
+            log(SEVERITY_ERROR, "Run aborted: destination server missing", "serverId=${plan.serverId}")
             return@withContext finalizeRun(
                 runId = runId,
                 planId = planId,
@@ -121,6 +125,7 @@ class RunPlanBackupUseCase(
 
         val password = credentialStore.loadPassword(server.credentialAlias)
         if (password == null) {
+            log(SEVERITY_ERROR, "Run aborted: credentials unavailable", "serverId=${server.serverId} alias=${server.credentialAlias}")
             return@withContext finalizeRun(
                 runId = runId,
                 planId = planId,
@@ -141,6 +146,8 @@ class RunPlanBackupUseCase(
             username = server.username,
             password = password,
         )
+
+        log(SEVERITY_INFO, "Resolved destination", "host=${server.host} share=${server.shareName} basePath=${server.basePath}")
 
         val items = runCatching { mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum) }
             .getOrElse { throwable ->
@@ -170,6 +177,7 @@ class RunPlanBackupUseCase(
             val record = backupRecordRepository.findByPlanAndMediaItem(planId, item.mediaId)
             if (record != null) {
                 skippedCount += 1
+                log(SEVERITY_INFO, "Skipped previously uploaded item", "mediaItemId=${item.mediaId}")
                 continue
             }
 
@@ -214,6 +222,7 @@ class RunPlanBackupUseCase(
                 }
                 if (recordResult.isSuccess) {
                     uploadedCount += 1
+                    log(SEVERITY_INFO, "Uploaded item", "mediaItemId=${item.mediaId} remotePath=$remotePath")
                 } else {
                     failedCount += 1
                     val recordError = recordResult.exceptionOrNull()
@@ -227,7 +236,7 @@ class RunPlanBackupUseCase(
                 val mapped = throwable?.toSmbConnectionFailure()
                 val message = mapped?.toUserMessage() ?: "Upload failed for item ${item.mediaId}."
                 summaryError = summaryError ?: message
-                log(SEVERITY_ERROR, message, throwable?.message)
+                log(SEVERITY_ERROR, message, throwable.toLogDetail())
             }
         }
 
@@ -369,6 +378,12 @@ internal object PathRenderer {
             }
         }
     }
+}
+
+
+private fun Throwable?.toLogDetail(): String? {
+    if (this == null) return null
+    return "${this::class.simpleName}: ${this.message.orEmpty()}".trim()
 }
 
 private fun skezza.smbsync.data.smb.SmbConnectionFailure.toUserMessage(): String = when (this) {

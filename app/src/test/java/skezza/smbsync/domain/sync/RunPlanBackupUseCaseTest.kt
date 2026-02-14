@@ -127,6 +127,42 @@ class RunPlanBackupUseCaseTest {
         assertEquals(1, result.failedCount)
     }
 
+
+    @Test
+    fun invoke_logsAbortReasonWhenPlanMissing() = runBlocking {
+        val useCase = RunPlanBackupUseCase(
+            planRepository = object : PlanRepository {
+                override fun observePlans(): Flow<List<PlanEntity>> = flowOf(emptyList())
+                override suspend fun getPlan(planId: Long): PlanEntity? = null
+                override suspend fun createPlan(plan: PlanEntity): Long = 0
+                override suspend fun updatePlan(plan: PlanEntity) = Unit
+                override suspend fun deletePlan(planId: Long) = Unit
+            },
+            serverRepository = FakeServerRepository(
+                ServerEntity(
+                    serverId = 1,
+                    name = "s",
+                    host = "h",
+                    shareName = "sh",
+                    basePath = "b",
+                    username = "u",
+                    credentialAlias = "a",
+                ),
+            ),
+            backupRecordRepository = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepository = FakeRunRepository(),
+            runLogRepository = FakeRunLogRepository(),
+            credentialStore = FakeCredentialStore("pw"),
+            mediaStoreDataSource = FakeMediaStoreDataSource(emptyList()),
+            smbClient = FakeSmbClient(),
+            nowEpochMs = { 1000L },
+        )
+
+        val result = useCase(100)
+
+        assertEquals("FAILED", result.status)
+    }
+
     @Test
     fun sanitizeSegment_replacesIllegalCharacters() {
         val sanitized = PathRenderer.sanitizeSegment("cam<era>:name?.jpg")
