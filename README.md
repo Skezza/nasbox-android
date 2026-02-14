@@ -19,7 +19,7 @@ SMBSync is an Android app focused on **manual, archive-only photo backup** from 
 - ✅ Phase 4 complete: MediaStore album integration, runtime photo permission flow, and full plan management are implemented.
 - ✨ Plans now support **Photo Album** and **General Folder** source types, optional video inclusion for album plans, optional album templating, and a full-phone backup preset for shared storage.
 - ✅ Phase 5 complete: core sync engine is implemented with run records, item-level continue-on-error handling, SMB uploads, and backup-proof persistence.
-- ⏳ Next: Phase 6 dashboard mission control and live timeline surfaces.
+- ⏳ Next: Phase 5.5 source-execution expansion for Folder and Full-Device plans, followed by Phase 6 dashboard mission control.
 
 See:
 - `project_plan.md` for phase-by-phase roadmap

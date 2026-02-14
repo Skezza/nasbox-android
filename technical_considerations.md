@@ -250,3 +250,11 @@ Each mapped error should provide:
 - SMB upload now uses the `SmbClient.uploadFile(...)` operation with directory ensure/create behavior before writing file streams.
 - Manual execution is now surfaced from the Plans list with a per-plan **Run now** action and in-place running indicator.
 - Current source support in Phase 5 is intentionally limited to album-backed plans; unsupported source modes finalize as failed with explicit messaging to avoid silent behavior.
+
+
+## Phase 5.5 planned implementation notes
+- Extend `RunPlanBackupUseCase` source ingestion beyond album scans to support folder URI/path sources and full-device shared-storage roots.
+- Preserve archive-only semantics and existing proof-of-backup strategy while introducing stable identifiers for non-MediaStore-album items.
+- Reuse existing SMB upload orchestration/path sanitization/logging behaviors, adding source-mode-specific diagnostics where needed.
+- Keep unsupported/denied paths non-fatal at item granularity (continue-on-error), with actionable run summaries.
+- This phase is planning-only in current docs and intentionally defers actual code implementation to a dedicated follow-up worker.
