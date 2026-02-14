@@ -64,17 +64,6 @@ fun VaultScreen(
         viewModel.clearMessage()
     }
 
-    if (browseState.isVisible) {
-        BrowseDestinationDialog(
-            state = browseState,
-            onDismiss = viewModel::closeBrowseDestination,
-            onRefresh = viewModel::refreshBrowseDestination,
-            onSelectShare = viewModel::selectBrowseShare,
-            onOpenDirectory = viewModel::openBrowseDirectory,
-            onNavigateBreadcrumb = viewModel::navigateBrowseBreadcrumb,
-            onUseLocation = viewModel::applyBrowseSelection,
-        )
-    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },

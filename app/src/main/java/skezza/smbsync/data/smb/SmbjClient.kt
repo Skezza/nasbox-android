@@ -1,6 +1,5 @@
 package skezza.smbsync.data.smb
 
-import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.protocol.commons.buffer.Buffer
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
@@ -39,7 +38,12 @@ class SmbjClient : SmbClient {
             smbClient.connect(host).use { connection ->
                 val authContext = AuthenticationContext(username, password.toCharArray(), "")
                 connection.authenticate(authContext).use { session ->
-                    connection.listShares().mapNotNull { it.netName }.filter { it.isNotBlank() }
+                    val rawShares = readShareNamesReflectively(session)
+                    rawShares
+                        .map { it.trim().trimEnd('$') }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .sorted()
                 }
             }
         }
@@ -62,18 +66,36 @@ class SmbjClient : SmbClient {
                             ?: throw IllegalStateException("Share is not a disk share.")
                         val queryPath = path.trim().replace('/', '\\').trim('\\')
                         diskShare.list(queryPath)
-                            .filter { info ->
-                                val fileName = info.fileName
-                                val isNavigationEntry = fileName == "." || fileName == ".."
-                                !isNavigationEntry && info.fileAttributes.contains(FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
-                            }
                             .map { it.fileName }
+                            .filter { it != "." && it != ".." && it.isNotBlank() }
                     } finally {
                         share.close()
                     }
                 }
             }
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun readShareNamesReflectively(session: Any): List<String> {
+        return runCatching {
+            val method = session.javaClass.methods.firstOrNull { it.name == "listShares" && it.parameterCount == 0 }
+            val result = method?.invoke(session)
+            when (result) {
+                is Collection<*> -> result.mapNotNull { item ->
+                    when (item) {
+                        is String -> item
+                        null -> null
+                        else -> {
+                            val netName = item.javaClass.methods.firstOrNull { m -> m.name == "getNetName" && m.parameterCount == 0 }
+                                ?.invoke(item) as? String
+                            netName ?: item.toString()
+                        }
+                    }
+                }
+                else -> emptyList()
+            }
+        }.getOrDefault(emptyList())
     }
 }
 
