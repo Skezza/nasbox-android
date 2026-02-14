@@ -264,6 +264,7 @@ class RunPlanBackupUseCase(
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
         private const val SEVERITY_INFO = "INFO"
         private const val SEVERITY_ERROR = "ERROR"
+
     }
 }
 
@@ -278,6 +279,7 @@ data class RunExecutionResult(
 internal object PathRenderer {
     private const val DEFAULT_TEMPLATE = "{year}/{month}/{day}"
     private const val DEFAULT_FILENAME_PATTERN = "{timestamp}_{mediaId}.{ext}"
+    private val ILLEGAL_PATH_CHARS = setOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
 
     fun render(
         basePath: String,
@@ -329,9 +331,17 @@ internal object PathRenderer {
 
     internal fun sanitizeSegment(value: String): String {
         val trimmed = value.trim().ifBlank { "unknown" }
-        return trimmed
-            .replace(Regex("[<>:\"/\\|?*]"), "_")
-            .replace(Regex("[\\p{Cntrl}]"), "_")
+        return buildString(trimmed.length) {
+            trimmed.forEach { ch ->
+                append(
+                    when {
+                        ch.code < 32 -> '_'
+                        ch in ILLEGAL_PATH_CHARS -> '_'
+                        else -> ch
+                    },
+                )
+            }
+        }
     }
 }
 
