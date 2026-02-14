@@ -10,13 +10,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
@@ -179,6 +181,7 @@ fun ServerEditorScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.editorState.collectAsState()
+    val browserState by viewModel.browserState.collectAsState()
     val message by viewModel.message.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -237,6 +240,12 @@ fun ServerEditorScreen(
             ServerField("Base path", state.basePath, state.validation.basePathError) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
+
+            ElevatedButton(onClick = viewModel::openServerBrowser, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Folder, contentDescription = null)
+                Text("Browse share & folders", modifier = Modifier.padding(start = 8.dp))
+            }
+
             ServerField("Username", state.username, state.validation.usernameError) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
@@ -260,6 +269,19 @@ fun ServerEditorScreen(
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
                 }
             }
+        }
+
+        if (browserState.isVisible) {
+            ServerBrowserDialog(
+                state = browserState,
+                onDismiss = viewModel::closeServerBrowser,
+                onRefresh = { viewModel.browseServerPath(pathOverride = browserState.currentPath) },
+                onChooseShare = viewModel::browseShare,
+                onNavigateUp = viewModel::browseParentDirectory,
+                onOpenDirectory = viewModel::browseChildDirectory,
+                onUseCurrentFolder = viewModel::useCurrentFolderFromBrowser,
+                onUseDirectory = viewModel::useDirectoryFromBrowser,
+            )
         }
     }
 }
@@ -290,6 +312,103 @@ private fun ServerField(
 }
 
 @Composable
+private fun ServerBrowserDialog(
+    state: ServerBrowserUiState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onChooseShare: (String) -> Unit,
+    onNavigateUp: () -> Unit,
+    onOpenDirectory: (String) -> Unit,
+    onUseCurrentFolder: () -> Unit,
+    onUseDirectory: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Browse SMB location") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Choose a share, then drill into folders to prefill your sync base path.")
+                if (state.isLoading) {
+                    Text("Loading SMB folders...")
+                }
+                if (!state.shareName.isBlank()) {
+                    Text("Share: ${state.shareName}")
+                    Text("Current folder: ${state.currentPathLabel}")
+                    if (state.hasParentDirectory) {
+                        TextButton(onClick = onNavigateUp) {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null)
+                            Text("Up", modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
+                }
+                if (!state.errorMessage.isNullOrBlank()) {
+                    Text(state.errorMessage)
+                }
+
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 280.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (state.shareName.isBlank()) {
+                        items(state.shares, key = { it }) { share ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onChooseShare(share) }
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(share)
+                                TextButton(onClick = { onChooseShare(share) }) {
+                                    Text("Open")
+                                }
+                            }
+                        }
+                    } else {
+                        items(state.directories, key = { it }) { directory ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenDirectory(directory) }
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(directory)
+                                Row {
+                                    TextButton(onClick = { onUseDirectory(directory) }) {
+                                        Text("Use")
+                                    }
+                                    TextButton(onClick = { onOpenDirectory(directory) }) {
+                                        Text("Open")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = onRefresh, enabled = !state.isLoading) {
+                    Text("Refresh")
+                }
+                if (!state.shareName.isBlank()) {
+                    TextButton(onClick = onUseCurrentFolder) {
+                        Text("Use this folder")
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        },
+    )
+}
+
+@Composable
 private fun DiscoveryDialog(
     state: DiscoveryUiState,
     onDismiss: () -> Unit,
@@ -311,7 +430,7 @@ private fun DiscoveryDialog(
                 if (!state.isScanning && state.servers.isEmpty() && state.errorMessage == null) {
                     Text("No SMB servers discovered.")
                 }
-                androidx.compose.foundation.lazy.LazyColumn(
+                LazyColumn(
                     modifier = Modifier.heightIn(max = 260.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {

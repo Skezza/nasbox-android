@@ -10,6 +10,8 @@ import org.junit.Test
 import skezza.smbsync.data.db.ServerEntity
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
+import skezza.smbsync.data.smb.SmbBrowseRequest
+import skezza.smbsync.data.smb.SmbBrowseResult
 import skezza.smbsync.data.smb.SmbClient
 import skezza.smbsync.data.smb.SmbConnectionRequest
 import skezza.smbsync.data.smb.SmbConnectionResult
@@ -82,6 +84,9 @@ class TestSmbConnectionUseCaseTest {
             error?.let { throw it }
             return checkNotNull(result)
         }
+
+        override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult =
+            SmbBrowseResult(shareName = request.shareName, directoryPath = request.directoryPath, shares = emptyList(), directories = emptyList())
     }
 
     private class FakeServerRepository(

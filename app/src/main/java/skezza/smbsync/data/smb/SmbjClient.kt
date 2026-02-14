@@ -1,6 +1,7 @@
 package skezza.smbsync.data.smb
 
 import com.hierynomus.protocol.commons.buffer.Buffer
+import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import java.net.SocketTimeoutException
@@ -28,6 +29,73 @@ class SmbjClient : SmbClient {
         }
         SmbConnectionResult(latencyMs = latency)
     }
+
+    override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    if (request.shareName.isBlank()) {
+                        val shares = session.listShares().sorted()
+                        return@withContext SmbBrowseResult(
+                            shareName = "",
+                            directoryPath = "",
+                            shares = shares,
+                            directories = emptyList(),
+                        )
+                    }
+
+                    val normalizedPath = normalizeDirectoryPath(request.directoryPath)
+                    val connectedShare = session.connectShare(request.shareName)
+                    if (connectedShare !is DiskShare) {
+                        connectedShare.close()
+                        return@withContext SmbBrowseResult(
+                            shareName = request.shareName,
+                            directoryPath = normalizedPath,
+                            shares = emptyList(),
+                            directories = emptyList(),
+                        )
+                    }
+
+                    connectedShare.use { diskShare ->
+                        val directories = diskShare.list(normalizedPath)
+                            .asSequence()
+                            .map { it.fileName }
+                            .filter { it != "." && it != ".." }
+                            .filter { entryName ->
+                                runCatching {
+                                    diskShare.folderExists(joinPath(normalizedPath, entryName))
+                                }.getOrDefault(false)
+                            }
+                            .sorted()
+                            .toList()
+
+                        SmbBrowseResult(
+                            shareName = request.shareName,
+                            directoryPath = normalizedPath,
+                            shares = emptyList(),
+                            directories = directories,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun normalizeDirectoryPath(path: String): String {
+    return path.trim().replace('\\', '/').trim('/').takeIf { it.isNotBlank() } ?: ""
+}
+
+private fun joinPath(basePath: String, segment: String): String {
+    val normalizedSegment = segment.trim().trim('/').trim('\\')
+    if (basePath.isBlank()) {
+        return normalizedSegment
+    }
+    if (normalizedSegment.isBlank()) {
+        return basePath
+    }
+    return "$basePath/$normalizedSegment"
 }
 
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {

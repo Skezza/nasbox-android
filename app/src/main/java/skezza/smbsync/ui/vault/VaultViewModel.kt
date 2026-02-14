@@ -17,6 +17,7 @@ import skezza.smbsync.data.discovery.DiscoveredSmbServer
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbPathUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 import skezza.smbsync.domain.vault.ServerInput
 import skezza.smbsync.domain.vault.ServerValidationResult
@@ -27,6 +28,7 @@ class VaultViewModel(
     private val credentialStore: CredentialStore,
     private val testSmbConnectionUseCase: TestSmbConnectionUseCase,
     private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+    private val browseSmbPathUseCase: BrowseSmbPathUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
 ) : ViewModel() {
 
@@ -60,6 +62,9 @@ class VaultViewModel(
     private val _discoveryState = MutableStateFlow(DiscoveryUiState())
     val discoveryState: StateFlow<DiscoveryUiState> = _discoveryState.asStateFlow()
 
+    private val _browserState = MutableStateFlow(ServerBrowserUiState())
+    val browserState: StateFlow<ServerBrowserUiState> = _browserState.asStateFlow()
+
     fun clearMessage() {
         _message.value = null
     }
@@ -78,6 +83,7 @@ class VaultViewModel(
                     basePath = "backup",
                 )
             }
+            _browserState.value = ServerBrowserUiState()
             clearMessage()
             return
         }
@@ -97,6 +103,7 @@ class VaultViewModel(
                     password = existingPassword,
                     validation = ServerValidationResult(),
                 )
+                _browserState.value = ServerBrowserUiState()
                 clearMessage()
             }.onFailure {
                 _message.value = "Unable to load server details. Please try again."
@@ -151,6 +158,7 @@ class VaultViewModel(
                 }
             }.onSuccess {
                 _editorState.value = ServerEditorUiState()
+                _browserState.value = ServerBrowserUiState()
                 clearMessage()
                 onSuccess()
             }.onFailure {
@@ -205,6 +213,99 @@ class VaultViewModel(
             }
             _editorState.value = _editorState.value.copy(isTestingConnection = false)
         }
+    }
+
+    fun openServerBrowser() {
+        _browserState.value = ServerBrowserUiState(isVisible = true)
+        browseServerPath(pathOverride = _editorState.value.basePath)
+    }
+
+    fun closeServerBrowser() {
+        _browserState.value = _browserState.value.copy(isVisible = false)
+    }
+
+    fun browseServerPath(pathOverride: String? = null, shareOverride: String? = null) {
+        viewModelScope.launch {
+            val editor = _editorState.value
+            if (editor.host.isBlank() || editor.username.isBlank() || editor.password.isBlank()) {
+                _browserState.value = _browserState.value.copy(
+                    isVisible = true,
+                    isLoading = false,
+                    errorMessage = "Add host, username, and password first, then browse.",
+                )
+                return@launch
+            }
+
+            val requestedShare = shareOverride ?: editor.shareName
+            val requestedPath = normalizePath(pathOverride ?: _browserState.value.currentPath)
+
+            _browserState.value = _browserState.value.copy(
+                isVisible = true,
+                isLoading = true,
+                errorMessage = null,
+            )
+
+            val result = browseSmbPathUseCase(
+                host = editor.host,
+                shareName = requestedShare,
+                directoryPath = requestedPath,
+                username = editor.username,
+                password = editor.password,
+            )
+
+            if (!result.success) {
+                _browserState.value = _browserState.value.copy(
+                    isLoading = false,
+                    errorMessage = listOfNotNull(result.message, result.recoveryHint).joinToString(" "),
+                )
+                return@launch
+            }
+
+            if (result.shareName.isNotBlank() && result.shareName != editor.shareName) {
+                _editorState.value = editor.updateField(ServerEditorField.SHARE, result.shareName)
+            }
+
+            _browserState.value = _browserState.value.copy(
+                isVisible = true,
+                isLoading = false,
+                shareName = result.shareName,
+                currentPath = result.currentPath,
+                shares = result.shares,
+                directories = result.directories,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun browseParentDirectory() {
+        val parentPath = _browserState.value.currentPath.substringBeforeLast('/', "")
+        browseServerPath(pathOverride = parentPath)
+    }
+
+    fun browseChildDirectory(directory: String) {
+        val nextPath = joinPath(_browserState.value.currentPath, directory)
+        browseServerPath(pathOverride = nextPath)
+    }
+
+    fun browseShare(shareName: String) {
+        _editorState.value = _editorState.value.updateField(ServerEditorField.SHARE, shareName)
+        browseServerPath(pathOverride = "", shareOverride = shareName)
+    }
+
+    fun useCurrentFolderFromBrowser() {
+        val folder = normalizePath(_browserState.value.currentPath)
+        if (folder.isBlank()) {
+            _message.value = "Pick a folder before applying to base path."
+            return
+        }
+        _editorState.value = _editorState.value.updateField(ServerEditorField.BASE_PATH, folder)
+        _message.value = "Base path set to $folder"
+    }
+
+    fun useDirectoryFromBrowser(directory: String) {
+        val selected = joinPath(_browserState.value.currentPath, directory)
+        _editorState.value = _editorState.value.updateField(ServerEditorField.BASE_PATH, selected)
+        _message.value = "Base path set to $selected"
     }
 
     fun discoverServers() {
@@ -263,6 +364,7 @@ class VaultViewModel(
             credentialStore: CredentialStore,
             testSmbConnectionUseCase: TestSmbConnectionUseCase,
             discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+            browseSmbPathUseCase: BrowseSmbPathUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(VaultViewModel::class.java)) {
@@ -272,6 +374,7 @@ class VaultViewModel(
                         credentialStore = credentialStore,
                         testSmbConnectionUseCase = testSmbConnectionUseCase,
                         discoverSmbServersUseCase = discoverSmbServersUseCase,
+                        browseSmbPathUseCase = browseSmbPathUseCase,
                     ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
@@ -333,3 +436,31 @@ data class DiscoveryUiState(
     val servers: List<DiscoveredSmbServer> = emptyList(),
     val errorMessage: String? = null,
 )
+
+data class ServerBrowserUiState(
+    val isVisible: Boolean = false,
+    val isLoading: Boolean = false,
+    val shareName: String = "",
+    val currentPath: String = "",
+    val shares: List<String> = emptyList(),
+    val directories: List<String> = emptyList(),
+    val errorMessage: String? = null,
+) {
+    val hasParentDirectory: Boolean = currentPath.contains('/')
+    val currentPathLabel: String = currentPath.ifBlank { "/" }
+}
+
+private fun normalizePath(path: String): String {
+    return path.trim().replace('\\', '/').trim('/').takeIf { it.isNotBlank() } ?: ""
+}
+
+private fun joinPath(basePath: String, segment: String): String {
+    val normalizedSegment = normalizePath(segment)
+    if (basePath.isBlank()) {
+        return normalizedSegment
+    }
+    if (normalizedSegment.isBlank()) {
+        return basePath
+    }
+    return "$basePath/$normalizedSegment"
+}

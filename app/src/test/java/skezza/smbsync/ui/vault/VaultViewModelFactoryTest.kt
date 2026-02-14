@@ -9,18 +9,21 @@ import org.junit.Test
 import skezza.smbsync.data.db.ServerEntity
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
+import skezza.smbsync.data.smb.SmbBrowseRequest
+import skezza.smbsync.data.smb.SmbBrowseResult
 import skezza.smbsync.data.smb.SmbClient
 import skezza.smbsync.data.smb.SmbConnectionRequest
 import skezza.smbsync.data.smb.SmbConnectionResult
 import skezza.smbsync.data.discovery.SmbServerDiscoveryScanner
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbPathUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 
 class VaultViewModelFactoryTest {
 
     @Test
     fun factoryCreateWithClassAndExtras_returnsVaultViewModel() {
-        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase())
+        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase(), fakeBrowseUseCase())
 
         val vmFromClass = factory.create(VaultViewModel::class.java)
         val vmFromExtras = factory.create(VaultViewModel::class.java, MutableCreationExtras())
@@ -31,11 +34,20 @@ class VaultViewModelFactoryTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun factoryRejectsUnknownViewModelClass() {
-        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase())
+        val factory = VaultViewModel.factory(FakeServerRepository(), FakeCredentialStore(), fakeUseCase(), fakeDiscoveryUseCase(), fakeBrowseUseCase())
         factory.create(UnknownViewModel::class.java)
     }
 
 
+    private fun fakeBrowseUseCase(): BrowseSmbPathUseCase = BrowseSmbPathUseCase(
+        smbClient = object : SmbClient {
+            override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
+                SmbConnectionResult(latencyMs = 1)
+
+            override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult =
+                SmbBrowseResult(shareName = request.shareName, directoryPath = request.directoryPath, shares = emptyList(), directories = emptyList())
+        },
+    )
 
     private fun fakeDiscoveryUseCase(): DiscoverSmbServersUseCase = DiscoverSmbServersUseCase(
         scanner = object : SmbServerDiscoveryScanner {
@@ -49,6 +61,9 @@ class VaultViewModelFactoryTest {
         smbClient = object : SmbClient {
             override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
                 SmbConnectionResult(latencyMs = 1)
+
+            override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult =
+                SmbBrowseResult(shareName = request.shareName, directoryPath = request.directoryPath, shares = emptyList(), directories = emptyList())
         },
     )
 
