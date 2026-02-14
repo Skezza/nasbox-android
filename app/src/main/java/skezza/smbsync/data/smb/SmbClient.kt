@@ -1,5 +1,7 @@
 package skezza.smbsync.data.smb
 
+import java.io.InputStream
+
 data class SmbConnectionRequest(
     val host: String,
     val shareName: String,
@@ -13,4 +15,14 @@ data class SmbConnectionResult(
 
 interface SmbClient {
     suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult
+
+    suspend fun uploadFile(
+        request: SmbConnectionRequest,
+        remotePath: String,
+        contentLengthBytes: Long?,
+        inputStream: InputStream,
+        onProgressBytes: (Long) -> Unit = {},
+    ) {
+        throw UnsupportedOperationException("Upload is not implemented by this SMB client")
+    }
 }

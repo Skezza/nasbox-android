@@ -242,3 +242,19 @@ Each mapped error should provide:
 - Runtime media permission handling is implemented by Android SDK level (`READ_MEDIA_IMAGES` for Android 13+, `READ_EXTERNAL_STORAGE` for legacy versions) with clear blocked-state guidance in the plan editor.
 - Plan editor now validates required fields for name, source album, destination server, directory template, and filename pattern before persistence.
 - First-plan UX defaults are applied when no plans exist by auto-selecting a camera-like album (when present) and seeding default template/pattern values.
+
+## Phase 5 implementation notes
+- Core backup orchestration is now implemented via `RunPlanBackupUseCase`, which creates a `RUNNING` entry, scans source media, applies backup-record skip logic, uploads new files, persists proof records, and finalizes run status/counters.
+- Archive-only semantics are enforced: no local/remote delete operations are performed and only new items are uploaded.
+- Per-item failures are isolated (continue-on-error) and mapped into persisted run logs plus run-level `summaryError` values for user-facing diagnostics.
+- SMB upload now uses the `SmbClient.uploadFile(...)` operation with directory ensure/create behavior before writing file streams.
+- Manual execution is now surfaced from the Plans list with a per-plan **Run now** action and in-place running indicator.
+- Current source support in Phase 5 is intentionally limited to album-backed plans; unsupported source modes finalize as failed with explicit messaging to avoid silent behavior.
+
+
+## Phase 5.5 planned implementation notes
+- Extend `RunPlanBackupUseCase` source ingestion beyond album scans to support folder URI/path sources and full-device shared-storage roots.
+- Preserve archive-only semantics and existing proof-of-backup strategy while introducing stable identifiers for non-MediaStore-album items.
+- Reuse existing SMB upload orchestration/path sanitization/logging behaviors, adding source-mode-specific diagnostics where needed.
+- Keep unsupported/denied paths non-fatal at item granularity (continue-on-error), with actionable run summaries.
+- This phase is planning-only in current docs and intentionally defers actual code implementation to a dedicated follow-up worker.
