@@ -80,6 +80,7 @@ class RunPlanBackupUseCaseTest {
         assertEquals(1, result.skippedCount)
         assertEquals(0, result.failedCount)
         assertEquals(1, smbClient.uploadedPaths.size)
+        assertEquals("photos/Camera/two.jpg", smbClient.uploadedPaths.first())
         assertTrue(backupRepo.createdRecords.any { it.mediaItemId == "2" })
         assertEquals("SUCCESS", runRepo.updatedRuns.last().status)
         assertTrue(logRepo.logs.any { it.message == "Run finished" })
@@ -203,6 +204,30 @@ class RunPlanBackupUseCaseTest {
         assertEquals("Only album-based plans are supported in Phase 5.", result.summaryError)
     }
 
+
+    @Test
+    fun render_appliesTemplateWhenAlbumTemplatingEnabled() {
+        val rendered = PathRenderer.render(
+            basePath = "photos",
+            directoryTemplate = "{year}/{month}/{album}",
+            filenamePattern = "{timestamp}_{mediaId}.{ext}",
+            mediaItem = MediaImageItem(
+                mediaId = "77",
+                bucketId = "bucket",
+                displayName = "IMG_0077.JPG",
+                mimeType = "image/jpeg",
+                dateTakenEpochMs = 1_700_000_000_000,
+                sizeBytes = 1024,
+            ),
+            fallbackAlbumToken = "Camera",
+            useAlbumTemplating = true,
+        )
+
+        assertTrue(rendered.startsWith("photos/"))
+        assertTrue(rendered.contains("/Camera/"))
+        assertTrue(rendered.endsWith("_77.jpg"))
+    }
+
     @Test
     fun sanitizeSegment_replacesIllegalCharacters() {
         val sanitized = PathRenderer.sanitizeSegment("cam<era>:name?.jpg")
@@ -284,7 +309,7 @@ class RunPlanBackupUseCaseTest {
         private val items: List<MediaImageItem>,
         private val throwOnScan: Boolean = false,
     ) : MediaStoreDataSource {
-        override suspend fun listAlbums(): List<MediaAlbum> = emptyList()
+        override suspend fun listAlbums(): List<MediaAlbum> = listOf(MediaAlbum("album-1", "Camera", items.size, null))
         override suspend fun listImagesForAlbum(bucketId: String): List<MediaImageItem> {
             if (throwOnScan) error("permission denied")
             return items

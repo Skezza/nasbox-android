@@ -154,7 +154,18 @@ class RunPlanBackupUseCase(
             password = password,
         )
 
-        log(SEVERITY_INFO, "Resolved destination", "host=${server.host} share=${server.shareName} basePath=${server.basePath}")
+        val albumDisplayName = runCatching {
+            mediaStoreDataSource.listAlbums().firstOrNull { it.bucketId == plan.sourceAlbum }?.displayName
+        }.getOrNull().orEmpty().ifBlank { plan.sourceAlbum }
+
+        log(
+            SEVERITY_INFO,
+            "Resolved destination",
+            "host=${server.host} share=${server.shareName} basePath=${server.basePath} templating=${plan.useAlbumTemplating}",
+        )
+        if (plan.useAlbumTemplating) {
+            log(SEVERITY_INFO, "Template configuration", "dir=${plan.directoryTemplate} file=${plan.filenamePattern}")
+        }
 
         val items = runCatching { mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum) }
             .getOrElse { throwable ->
@@ -193,7 +204,8 @@ class RunPlanBackupUseCase(
                 directoryTemplate = plan.directoryTemplate,
                 filenamePattern = plan.filenamePattern,
                 mediaItem = item,
-                fallbackAlbumToken = plan.sourceAlbum,
+                fallbackAlbumToken = albumDisplayName,
+                useAlbumTemplating = plan.useAlbumTemplating,
             )
 
             val stream = mediaStoreDataSource.openImageStream(item.mediaId)
@@ -331,15 +343,23 @@ internal object PathRenderer {
         filenamePattern: String,
         mediaItem: MediaImageItem,
         fallbackAlbumToken: String,
+        useAlbumTemplating: Boolean,
     ): String {
-        val date = Date(mediaItem.dateTakenEpochMs ?: 0L)
+        if (!useAlbumTemplating) {
+            val filename = sanitizeSegment(mediaItem.displayName.orEmpty().ifBlank { "${mediaItem.mediaId}.${extension(mediaItem)}" })
+            val pathSegments = listOf(basePath, sanitizeSegment(fallbackAlbumToken), filename).filter { it.isNotBlank() }
+            return pathSegments.joinToString("/") { it.trim('/') }
+        }
+
         val safeExt = extension(mediaItem)
+        val hasDate = mediaItem.dateTakenEpochMs != null
+        val date = Date(mediaItem.dateTakenEpochMs ?: 0L)
         val values = mapOf(
-            "year" to format(date, "yyyy"),
-            "month" to format(date, "MM"),
-            "day" to format(date, "dd"),
-            "time" to format(date, "HHmmss"),
-            "timestamp" to format(date, "yyyyMMdd_HHmmss"),
+            "year" to if (hasDate) format(date, "yyyy") else "unknown",
+            "month" to if (hasDate) format(date, "MM") else "unknown",
+            "day" to if (hasDate) format(date, "dd") else "unknown",
+            "time" to if (hasDate) format(date, "HHmmss") else "unknown",
+            "timestamp" to if (hasDate) format(date, "yyyyMMdd_HHmmss") else "unknown",
             "album" to sanitizeSegment(fallbackAlbumToken),
             "mediaId" to sanitizeSegment(mediaItem.mediaId),
             "ext" to sanitizeSegment(safeExt),

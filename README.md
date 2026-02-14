@@ -50,6 +50,7 @@ Vault also provides a **Discover servers** action that scans the current Wi-Fi s
 - Each run persists `runs` counters (scanned/uploaded/skipped/failed), terminal status (`SUCCESS`/`PARTIAL`/`FAILED`), and summary error when present.
 - Re-running a plan skips previously uploaded media using backup-proof records keyed by `(plan_id, media_item_id)`.
 - Upload path generation applies token rendering and SMB-safe segment sanitization before directory creation and stream upload.
+- When album templating is disabled, album runs preserve source-style naming by uploading to `<basePath>/<albumName>/<originalFilename>` (no date-based template folders).
 - Current implementation supports album-backed plans for execution; folder/full-device plans report unsupported-source failure until later phases.
 
 ## Plans and media prerequisites
