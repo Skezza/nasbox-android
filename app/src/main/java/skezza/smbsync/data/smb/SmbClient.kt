@@ -13,4 +13,18 @@ data class SmbConnectionResult(
 
 interface SmbClient {
     suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult
+
+    suspend fun listShares(
+        host: String,
+        username: String,
+        password: String,
+    ): List<String>
+
+    suspend fun listDirectories(
+        host: String,
+        shareName: String,
+        path: String,
+        username: String,
+        password: String,
+    ): List<String>
 }

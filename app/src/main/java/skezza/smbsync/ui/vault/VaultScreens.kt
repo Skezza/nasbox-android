@@ -64,6 +64,18 @@ fun VaultScreen(
         viewModel.clearMessage()
     }
 
+    if (browseState.isVisible) {
+        BrowseDestinationDialog(
+            state = browseState,
+            onDismiss = viewModel::closeBrowseDestination,
+            onRefresh = viewModel::refreshBrowseDestination,
+            onSelectShare = viewModel::selectBrowseShare,
+            onOpenDirectory = viewModel::openBrowseDirectory,
+            onNavigateBreadcrumb = viewModel::navigateBrowseBreadcrumb,
+            onUseLocation = viewModel::applyBrowseSelection,
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -179,6 +191,7 @@ fun ServerEditorScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.editorState.collectAsState()
+    val browseState by viewModel.browseState.collectAsState()
     val message by viewModel.message.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -190,6 +203,18 @@ fun ServerEditorScreen(
         val text = message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(text)
         viewModel.clearMessage()
+    }
+
+    if (browseState.isVisible) {
+        BrowseDestinationDialog(
+            state = browseState,
+            onDismiss = viewModel::closeBrowseDestination,
+            onRefresh = viewModel::refreshBrowseDestination,
+            onSelectShare = viewModel::selectBrowseShare,
+            onOpenDirectory = viewModel::openBrowseDirectory,
+            onNavigateBreadcrumb = viewModel::navigateBrowseBreadcrumb,
+            onUseLocation = viewModel::applyBrowseSelection,
+        )
     }
 
     Scaffold(
@@ -258,6 +283,9 @@ fun ServerEditorScreen(
                     enabled = !state.isTestingConnection,
                 ) {
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
+                }
+                ElevatedButton(onClick = viewModel::openBrowseDestination) {
+                    Text("Browse destination")
                 }
             }
         }
@@ -343,6 +371,90 @@ private fun DiscoveryDialog(
         confirmButton = {
             TextButton(onClick = onRefresh, enabled = !state.isScanning) {
                 Text(if (state.isScanning) "Scanning" else "Scan again")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+
+@Composable
+private fun BrowseDestinationDialog(
+    state: SmbBrowseUiState,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onSelectShare: (String) -> Unit,
+    onOpenDirectory: (String) -> Unit,
+    onNavigateBreadcrumb: (Int) -> Unit,
+    onUseLocation: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Browse SMB destination") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (state.selectedShare.isBlank()) "Select a share" else "Share: ${state.selectedShare}")
+                if (state.selectedShare.isNotBlank()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        state.breadcrumbs.forEachIndexed { index, segment ->
+                            TextButton(onClick = { onNavigateBreadcrumb(index) }) {
+                                Text(if (segment.isBlank()) "/" else segment)
+                            }
+                        }
+                    }
+                }
+                if (state.isLoading) {
+                    Text("Loading...")
+                }
+                if (!state.errorMessage.isNullOrBlank()) {
+                    Text(state.errorMessage)
+                }
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 260.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (state.selectedShare.isBlank()) {
+                        items(state.shares, key = { it }) { share ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelectShare(share) }
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(share)
+                                TextButton(onClick = { onSelectShare(share) }) { Text("Open") }
+                            }
+                        }
+                    } else {
+                        items(state.directories, key = { it }) { directory ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenDirectory(directory) }
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(directory)
+                                TextButton(onClick = { onOpenDirectory(directory) }) { Text("Open") }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = onRefresh, enabled = !state.isLoading) {
+                    Text("Refresh")
+                }
+                TextButton(onClick = onUseLocation, enabled = state.selectedShare.isNotBlank()) {
+                    Text("Use location")
+                }
             }
         },
         dismissButton = {

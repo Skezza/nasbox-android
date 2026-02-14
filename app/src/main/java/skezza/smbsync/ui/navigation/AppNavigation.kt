@@ -65,6 +65,7 @@ fun SMBSyncApp(
             credentialStore = appContainer.credentialStore,
             testSmbConnectionUseCase = appContainer.testSmbConnectionUseCase,
             discoverSmbServersUseCase = appContainer.discoverSmbServersUseCase,
+            browseSmbDestinationUseCase = appContainer.browseSmbDestinationUseCase,
         ),
     )
     val plansViewModel: PlansViewModel = viewModel(

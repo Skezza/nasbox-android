@@ -16,6 +16,7 @@ import skezza.smbsync.data.smb.SmbClient
 import skezza.smbsync.data.smb.SmbjClient
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
 import skezza.smbsync.domain.media.ListMediaAlbumsUseCase
+import skezza.smbsync.domain.smb.BrowseSmbDestinationUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 
 class AppContainer(context: Context) {
@@ -36,6 +37,10 @@ class AppContainer(context: Context) {
 
     val discoverSmbServersUseCase: DiscoverSmbServersUseCase = DiscoverSmbServersUseCase(
         scanner = smbServerDiscoveryScanner,
+    )
+
+    val browseSmbDestinationUseCase: BrowseSmbDestinationUseCase = BrowseSmbDestinationUseCase(
+        smbClient = smbClient,
     )
 
     val listMediaAlbumsUseCase: ListMediaAlbumsUseCase = ListMediaAlbumsUseCase(
