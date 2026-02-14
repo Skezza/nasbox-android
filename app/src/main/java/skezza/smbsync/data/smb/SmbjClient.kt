@@ -21,6 +21,7 @@ class SmbjClient : SmbClient {
     companion object {
         private const val LOG_TAG = "SMBSyncSmb"
     }
+
     override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = withContext(Dispatchers.IO) {
         val latency = measureTimeMillis {
             SMBClient().use { smbClient ->
@@ -46,43 +47,51 @@ class SmbjClient : SmbClient {
         inputStream: InputStream,
         onProgressBytes: (Long) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        Log.i(LOG_TAG, "uploadFile start host=${request.host} share=${request.shareName} path=$remotePath size=${contentLengthBytes ?: -1}")
+        Log.i(
+            LOG_TAG,
+            "uploadFile start host=${request.host} share=${request.shareName} path=$remotePath size=${contentLengthBytes ?: -1}",
+        )
+
         runCatching {
             SMBClient().use { smbClient ->
-            smbClient.connect(request.host).use { connection ->
-                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
-                connection.authenticate(authContext).use { session ->
-                    val share = session.connectShare(request.shareName)
-                    (share as? DiskShare)?.use { diskShare ->
-                        val normalizedPath = remotePath.replace("\\", "/").trim('/')
-                        ensureDirectories(diskShare, normalizedPath)
-                        val file = diskShare.openFile(
-                            normalizedPath.replace('/', '\\'),
-                            setOf(AccessMask.GENERIC_WRITE),
-                            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
-                            setOf(SMB2ShareAccess.FILE_SHARE_READ),
-                            SMB2CreateDisposition.FILE_OVERWRITE_IF,
-                            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-                        )
-                        file.outputStream.use { output ->
-                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                            var totalWritten = 0L
-                            while (true) {
-                                val read = inputStream.read(buffer)
-                                if (read <= 0) break
-                                output.write(buffer, 0, read)
-                                totalWritten += read
-                                onProgressBytes(totalWritten)
+                smbClient.connect(request.host).use { connection ->
+                    val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                    connection.authenticate(authContext).use { session ->
+                        val share = session.connectShare(request.shareName)
+                        (share as? DiskShare)?.use { diskShare ->
+                            val normalizedPath = remotePath.replace("\\", "/").trim('/')
+                            ensureDirectories(diskShare, normalizedPath)
+                            val file = diskShare.openFile(
+                                normalizedPath.replace('/', '\\'),
+                                setOf(AccessMask.GENERIC_WRITE),
+                                setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+                                setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                                SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                                setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+                            )
+                            file.outputStream.use { output ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                var totalWritten = 0L
+                                while (true) {
+                                    val read = inputStream.read(buffer)
+                                    if (read <= 0) break
+                                    output.write(buffer, 0, read)
+                                    totalWritten += read
+                                    onProgressBytes(totalWritten)
+                                }
+                                output.flush()
+                                Log.i(LOG_TAG, "uploadFile complete path=$remotePath bytes=$totalWritten")
                             }
-                            output.flush()
-                            Log.i(LOG_TAG, "uploadFile complete path=$remotePath bytes=$totalWritten")
-                        }
-                    } ?: error("Connected share is not a disk share")
-                    share.close()
+                        } ?: error("Connected share is not a disk share")
+                        share.close()
+                    }
                 }
             }
         }.onFailure {
-            Log.e(LOG_TAG, "uploadFile failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}")
+            Log.e(
+                LOG_TAG,
+                "uploadFile failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}",
+            )
             throw it
         }
     }
