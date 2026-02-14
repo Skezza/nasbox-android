@@ -17,6 +17,7 @@ import skezza.smbsync.data.discovery.DiscoveredSmbServer
 import skezza.smbsync.data.repository.ServerRepository
 import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbPathUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 import skezza.smbsync.domain.vault.ServerInput
 import skezza.smbsync.domain.vault.ServerValidationResult
@@ -27,6 +28,7 @@ class VaultViewModel(
     private val credentialStore: CredentialStore,
     private val testSmbConnectionUseCase: TestSmbConnectionUseCase,
     private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+    private val browseSmbPathUseCase: BrowseSmbPathUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
 ) : ViewModel() {
 
@@ -106,6 +108,104 @@ class VaultViewModel(
 
     fun updateEditorField(field: ServerEditorField, value: String) {
         _editorState.value = _editorState.value.updateField(field, value)
+        when (field) {
+            ServerEditorField.HOST,
+            ServerEditorField.SHARE,
+            ServerEditorField.USERNAME,
+            ServerEditorField.PASSWORD,
+            -> clearBrowseResults()
+
+            ServerEditorField.BASE_PATH -> _editorState.value = _editorState.value.copy(browsePath = value)
+            ServerEditorField.NAME -> Unit
+        }
+    }
+
+    fun browseSmbRoot() {
+        browse(path = "", clearShare = true)
+    }
+
+    fun browseSmbPath(path: String) {
+        browse(path = path)
+    }
+
+    fun selectShare(share: String) {
+        _editorState.value = _editorState.value.copy(
+            shareName = share,
+            browsePath = "",
+            discoveredFolders = emptyList(),
+            browseError = null,
+        )
+        browseSmbPath("")
+    }
+
+    fun enterFolder(folderName: String) {
+        val nextPath = appendPath(_editorState.value.browsePath, folderName)
+        browseSmbPath(nextPath)
+    }
+
+    fun browseUpOneLevel() {
+        val parent = parentPath(_editorState.value.browsePath)
+        browseSmbPath(parent)
+    }
+
+    fun useBrowsePathForBasePath() {
+        val selected = _editorState.value.browsePath
+        _editorState.value = _editorState.value.copy(basePath = selected)
+    }
+
+    private fun browse(path: String, clearShare: Boolean = false) {
+        viewModelScope.launch {
+            val current = _editorState.value
+            val validation = validateServerInput(
+                ServerInput(
+                    name = if (current.name.isBlank()) "temp" else current.name,
+                    host = current.host,
+                    shareName = if (clearShare) "" else current.shareName,
+                    basePath = if (current.basePath.isBlank()) "temp" else current.basePath,
+                    username = current.username,
+                    password = current.password,
+                ),
+            )
+            if (validation.hostError != null || validation.usernameError != null || validation.passwordError != null) {
+                _editorState.value = current.copy(validation = validation)
+                _message.value = "Enter host, username, and password to browse SMB folders."
+                return@launch
+            }
+
+            _editorState.value = current.copy(isBrowsing = true, browseError = null)
+            runCatching {
+                browseSmbPathUseCase.browse(
+                    host = current.host,
+                    shareName = if (clearShare) "" else current.shareName,
+                    path = path,
+                    username = current.username,
+                    password = current.password,
+                )
+            }.onSuccess { result ->
+                _editorState.value = _editorState.value.copy(
+                    isBrowsing = false,
+                    browsePath = result.currentPath,
+                    discoveredShares = result.shares,
+                    discoveredFolders = result.entries.filter { it.isDirectory }.map { it.name },
+                    browseError = null,
+                    shareName = if (clearShare) "" else _editorState.value.shareName,
+                )
+            }.onFailure {
+                _editorState.value = _editorState.value.copy(
+                    isBrowsing = false,
+                    browseError = it.message ?: "Unable to browse the SMB target.",
+                )
+            }
+        }
+    }
+
+    private fun clearBrowseResults() {
+        _editorState.value = _editorState.value.copy(
+            discoveredShares = emptyList(),
+            discoveredFolders = emptyList(),
+            browsePath = "",
+            browseError = null,
+        )
     }
 
     fun saveServer(onSuccess: () -> Unit) {
@@ -263,6 +363,7 @@ class VaultViewModel(
             credentialStore: CredentialStore,
             testSmbConnectionUseCase: TestSmbConnectionUseCase,
             discoverSmbServersUseCase: DiscoverSmbServersUseCase,
+            browseSmbPathUseCase: BrowseSmbPathUseCase,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(VaultViewModel::class.java)) {
@@ -272,6 +373,7 @@ class VaultViewModel(
                         credentialStore = credentialStore,
                         testSmbConnectionUseCase = testSmbConnectionUseCase,
                         discoverSmbServersUseCase = discoverSmbServersUseCase,
+                        browseSmbPathUseCase = browseSmbPathUseCase,
                     ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
@@ -315,6 +417,11 @@ data class ServerEditorUiState(
     val password: String = "",
     val validation: ServerValidationResult = ServerValidationResult(),
     val isTestingConnection: Boolean = false,
+    val isBrowsing: Boolean = false,
+    val browsePath: String = "",
+    val discoveredShares: List<String> = emptyList(),
+    val discoveredFolders: List<String> = emptyList(),
+    val browseError: String? = null,
 ) {
     fun updateField(field: ServerEditorField, value: String): ServerEditorUiState {
         return when (field) {
@@ -327,6 +434,12 @@ data class ServerEditorUiState(
         }
     }
 }
+
+private fun appendPath(current: String, folder: String): String =
+    if (current.isBlank()) folder else "$current/$folder"
+
+private fun parentPath(path: String): String =
+    path.substringBeforeLast('/', missingDelimiterValue = "")
 
 data class DiscoveryUiState(
     val isScanning: Boolean = false,

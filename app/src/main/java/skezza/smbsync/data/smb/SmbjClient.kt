@@ -1,6 +1,7 @@
 package skezza.smbsync.data.smb
 
 import com.hierynomus.protocol.commons.buffer.Buffer
+import com.hierynomus.smbj.share.DiskShare
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import java.net.SocketTimeoutException
@@ -28,6 +29,50 @@ class SmbjClient : SmbClient {
         }
         SmbConnectionResult(latencyMs = latency)
     }
+
+    override suspend fun browse(request: SmbBrowseRequest): SmbBrowseResult = withContext(Dispatchers.IO) {
+        SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    if (request.shareName.isBlank()) {
+                        val shares = session.listShares()
+                            .map { it.netName }
+                            .filter { !it.endsWith("$") }
+                            .sortedBy { it.lowercase() }
+                        SmbBrowseResult(currentPath = "", shares = shares)
+                    } else {
+                        val normalizedPath = request.path.trim().trim('/', '\\')
+                        val share = session.connectShare(request.shareName)
+                        try {
+                            val diskShare = share as? DiskShare
+                                ?: throw IllegalStateException("Selected share is not a disk share.")
+                            val entries = diskShare.list(normalizedPath)
+                                .asSequence()
+                                .map { it.fileName }
+                                .filter { it != "." && it != ".." }
+                                .map { fileName ->
+                                    SmbBrowseEntry(
+                                        name = fileName,
+                                        isDirectory = diskShare.folderExists(joinPath(normalizedPath, fileName)),
+                                    )
+                                }
+                                .sortedWith(compareBy<SmbBrowseEntry> { !it.isDirectory }.thenBy { it.name.lowercase() })
+                                .toList()
+                            SmbBrowseResult(currentPath = normalizedPath, entries = entries)
+                        } finally {
+                            share.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun joinPath(parent: String, child: String): String {
+    if (parent.isBlank()) return child
+    return "$parent\\$child"
 }
 
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {

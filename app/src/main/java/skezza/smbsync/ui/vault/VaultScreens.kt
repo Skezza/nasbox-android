@@ -1,6 +1,7 @@
 package skezza.smbsync.ui.vault
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedAssistChip
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -237,6 +239,8 @@ fun ServerEditorScreen(
             ServerField("Base path", state.basePath, state.validation.basePathError) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
+
+
             ServerField("Username", state.username, state.validation.usernameError) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
@@ -247,6 +251,74 @@ fun ServerEditorScreen(
                 isPassword = true,
             ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
+            }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Smart SMB Browser")
+                    Text("Peek at shares/folders and auto-fill your share + base path.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ElevatedButton(onClick = viewModel::browseSmbRoot, enabled = !state.isBrowsing) {
+                            Text(if (state.isBrowsing) "Browsing..." else "Load shares")
+                        }
+                        ElevatedButton(
+                            onClick = { viewModel.browseSmbPath(state.browsePath) },
+                            enabled = !state.isBrowsing && state.shareName.isNotBlank(),
+                        ) {
+                            Text("Refresh folders")
+                        }
+                        ElevatedButton(
+                            onClick = viewModel::browseUpOneLevel,
+                            enabled = !state.isBrowsing && state.browsePath.isNotBlank(),
+                        ) {
+                            Text("Up")
+                        }
+                    }
+                    if (state.browseError != null) {
+                        Text(state.browseError)
+                    }
+                    if (state.discoveredShares.isNotEmpty()) {
+                        Text("Shares")
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            state.discoveredShares.forEach { share ->
+                                ElevatedAssistChip(
+                                    onClick = { viewModel.selectShare(share) },
+                                    label = { Text(share) },
+                                )
+                            }
+                        }
+                    }
+                    if (state.shareName.isNotBlank()) {
+                        Text("Path: /${state.browsePath}")
+                    }
+                    if (state.discoveredFolders.isNotEmpty()) {
+                        Text("Folders")
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            state.discoveredFolders.forEach { folder ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.enterFolder(folder) }
+                                        .padding(vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(folder)
+                                    Text("Open")
+                                }
+                            }
+                        }
+                        ElevatedButton(onClick = viewModel::useBrowsePathForBasePath) {
+                            Text("Use this folder as base path")
+                        }
+                    }
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

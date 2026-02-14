@@ -11,6 +11,7 @@ import skezza.smbsync.data.security.CredentialStore
 import skezza.smbsync.data.smb.SmbClient
 import skezza.smbsync.data.smb.SmbjClient
 import skezza.smbsync.domain.discovery.DiscoverSmbServersUseCase
+import skezza.smbsync.domain.smb.BrowseSmbPathUseCase
 import skezza.smbsync.domain.smb.TestSmbConnectionUseCase
 
 class AppContainer(context: Context) {
@@ -29,5 +30,9 @@ class AppContainer(context: Context) {
 
     val discoverSmbServersUseCase: DiscoverSmbServersUseCase = DiscoverSmbServersUseCase(
         scanner = smbServerDiscoveryScanner,
+    )
+
+    val browseSmbPathUseCase: BrowseSmbPathUseCase = BrowseSmbPathUseCase(
+        smbClient = smbClient,
     )
 }
