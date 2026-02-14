@@ -51,8 +51,13 @@ class SmbjClient : SmbClient {
             smbClient.connect(request.host).use { connection ->
                 val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
                 connection.authenticate(authContext).use { session ->
-                    val share = session.connectShare(request.shareName) as DiskShare
-                    share.use {
+                    val rawShare = session.connectShare(request.shareName)
+                    if (rawShare !is DiskShare) {
+                        rawShare.close()
+                        throw IllegalStateException("Share '${request.shareName}' is not a disk share.")
+                    }
+
+                    rawShare.use { share ->
                         val normalizedPath = path.normalizeSmbPath()
                         share.list(normalizedPath)
                             .asSequence()
