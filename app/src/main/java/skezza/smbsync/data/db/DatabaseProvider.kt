@@ -17,13 +17,19 @@ object DatabaseProvider {
         }
     }
 
+    private val migration2To3 = object : Migration(2, 3) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // No schema changes; version bump preserves forward compatibility with previously shipped v3 db.
+        }
+    }
+
     fun get(context: Context): SMBSyncDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 SMBSyncDatabase::class.java,
                 "smbsync.db",
-            ).addMigrations(migration1To2)
+            ).addMigrations(migration1To2, migration2To3)
                 .build().also { instance = it }
         }
     }
