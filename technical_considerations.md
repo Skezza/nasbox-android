@@ -101,9 +101,11 @@ Guideline: UI must not depend directly on SMB or Room implementation classes.
 ---
 
 ## Media access strategy
-- Support Android 13+ image permission and legacy read permission for older Android versions.
+- Support Android 13+ source-aware media permissions (`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`) and legacy `READ_EXTERNAL_STORAGE` for older Android versions.
 - Query albums from MediaStore bucket metadata.
 - Query image items by selected album.
+- Support folder-source scans from either SAF tree URIs or filesystem paths, with stream opening by stable source item identifier.
+- Support full-device shared-storage scans across public roots (`DCIM`, `Pictures`, `Movies`, `Download`, `Documents`, `Music`) with inaccessible-root reporting.
 - Handle missing metadata defensively (missing display name/date/mime).
 
 ---
@@ -310,12 +312,13 @@ Each mapped error should provide:
 - Per-item failures are isolated (continue-on-error) and mapped into persisted run logs plus run-level `summaryError` values for user-facing diagnostics.
 - SMB upload now uses the `SmbClient.uploadFile(...)` operation with directory ensure/create behavior before writing file streams.
 - Manual execution is now surfaced from the Plans list with a per-plan **Run now** action and in-place running indicator.
-- Current source support in Phase 5 is intentionally limited to album-backed plans; unsupported source modes finalize as failed with explicit messaging to avoid silent behavior.
+- Phase 5 shipped with album-backed execution first; Phase 5.5 extends the same pipeline to folder and full-device source modes.
 
 
-## Phase 5.5 planned implementation notes
-- Extend `RunPlanBackupUseCase` source ingestion beyond album scans to support folder URI/path sources and full-device shared-storage roots.
-- Preserve archive-only semantics and existing proof-of-backup strategy while introducing stable identifiers for non-MediaStore-album items.
-- Reuse existing SMB upload orchestration/path sanitization/logging behaviors, adding source-mode-specific diagnostics where needed.
-- Keep unsupported/denied paths non-fatal at item granularity (continue-on-error), with actionable run summaries.
-- This phase is planning-only in current docs and intentionally defers actual code implementation to a dedicated follow-up worker.
+## Phase 5.5 implementation notes
+- `RunPlanBackupUseCase` now executes `ALBUM`, `FOLDER`, and `FULL_DEVICE` sources with a shared archive-only upload/proof pipeline.
+- Folder execution now scans either document-tree URIs (`content://...`) or direct filesystem folder paths, then preserves relative source subfolders in remote path rendering.
+- Full-device execution now scans shared-storage roots (`DCIM`, `Pictures`, `Movies`, `Download`, `Documents`, `Music`) and records inaccessible roots as explicit run failures without aborting the whole run.
+- Source item streams now resolve from numeric MediaStore IDs, content URIs, or file URIs via the media data-source abstraction.
+- Plans **Run now** permission requests are source-aware on Android 13+: album runs request image (and optional video) access, full-device runs request image/video/audio, and folder runs rely on folder-level URI grants when applicable.
+- Backup-proof deduplication remains keyed by `(plan_id, media_item_id)` and now uses stable source identifiers for folder/full-device items.

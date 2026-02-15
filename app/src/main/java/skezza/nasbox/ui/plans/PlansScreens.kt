@@ -1,6 +1,7 @@
 package skezza.nasbox.ui.plans
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -70,20 +71,17 @@ fun PlansScreen(
     val activeRunPlanIds by viewModel.activeRunPlanIds.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingRunPlanId by remember { mutableStateOf<Long?>(null) }
+    var pendingRunPermissions by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    val runPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_IMAGES
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
-
-    val runPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val runPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         val planId = pendingRunPlanId
         pendingRunPlanId = null
-        if (granted && planId != null) {
+        val denied = pendingRunPermissions.filterNot { grants[it] == true }
+        pendingRunPermissions = emptyList()
+        if (denied.isEmpty() && planId != null) {
             onRunPlan(planId)
-        } else if (!granted) {
-            viewModel.showMessage("Photo permission is required to run album backups.")
+        } else if (denied.isNotEmpty()) {
+            viewModel.showMessage("Required media permission was denied for this plan source.")
         }
     }
 
@@ -157,15 +155,22 @@ fun PlansScreen(
                                 Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
                                 Button(
                                     onClick = {
-                                        val hasPermission = ContextCompat.checkSelfPermission(
-                                            context,
-                                            runPermission,
-                                        ) == PackageManager.PERMISSION_GRANTED
-                                        if (hasPermission) {
+                                        val requiredPermissions = requiredRunPermissions(
+                                            sourceType = plan.sourceType,
+                                            includeVideos = plan.includeVideos,
+                                        )
+                                        val deniedPermissions = requiredPermissions.filter { permission ->
+                                            ContextCompat.checkSelfPermission(
+                                                context,
+                                                permission,
+                                            ) != PackageManager.PERMISSION_GRANTED
+                                        }
+                                        if (deniedPermissions.isEmpty()) {
                                             onRunPlan(plan.planId)
                                         } else {
                                             pendingRunPlanId = plan.planId
-                                            runPermissionLauncher.launch(runPermission)
+                                            pendingRunPermissions = deniedPermissions
+                                            runPermissionLauncher.launch(deniedPermissions.toTypedArray())
                                         }
                                     },
                                     enabled = plan.enabled && !activeRunPlanIds.contains(plan.planId),
@@ -208,7 +213,15 @@ fun PlanEditorScreen(
     }
 
     val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let { viewModel.updateEditorFolderPath(it.toString()) }
+        uri?.let {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.updateEditorFolderPath(it.toString())
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -366,6 +379,28 @@ fun PlanEditorScreen(
                 Text(if (planId == null) "Create plan" else "Save changes")
             }
         }
+    }
+}
+
+private fun requiredRunPermissions(
+    sourceType: PlanSourceType,
+    includeVideos: Boolean,
+): List<String> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        return listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+    return when (sourceType) {
+        PlanSourceType.ALBUM -> buildList {
+            add(Manifest.permission.READ_MEDIA_IMAGES)
+            if (includeVideos) add(Manifest.permission.READ_MEDIA_VIDEO)
+        }
+        PlanSourceType.FOLDER -> emptyList()
+        PlanSourceType.FULL_DEVICE -> listOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_AUDIO,
+        )
     }
 }
 

@@ -13,6 +13,7 @@ import skezza.nasbox.data.db.PlanEntity
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.db.ServerEntity
+import skezza.nasbox.data.media.FullDeviceScanResult
 import skezza.nasbox.data.media.MediaAlbum
 import skezza.nasbox.data.media.MediaImageItem
 import skezza.nasbox.data.media.MediaStoreDataSource
@@ -39,39 +40,26 @@ class RunPlanBackupUseCaseTest {
             filenamePattern = "{mediaId}.{ext}",
             enabled = true,
         )
-        val server = ServerEntity(
-            serverId = 20,
-            name = "NAS",
-            host = "host",
-            shareName = "share",
-            basePath = "photos",
-            domain = "",
-            username = "user",
-            credentialAlias = "alias",
-        )
+        val server = baseServer()
         val media = listOf(
             MediaImageItem("1", "album-1", "one.jpg", "image/jpeg", 1_700_000_000_000, 4),
             MediaImageItem("2", "album-1", "two.jpg", "image/jpeg", 1_700_000_000_100, 4),
         )
 
-        val planRepo = FakePlanRepository(plan)
-        val serverRepo = FakeServerRepository(server)
         val backupRepo = FakeBackupRecordRepository(existingMediaItemId = "1")
         val runRepo = FakeRunRepository()
         val logRepo = FakeRunLogRepository()
-        val mediaDataSource = FakeMediaStoreDataSource(media)
+        val mediaDataSource = FakeMediaStoreDataSource(albumItems = media)
         val smbClient = FakeSmbClient()
 
-        val useCase = RunPlanBackupUseCase(
-            planRepository = planRepo,
-            serverRepository = serverRepo,
-            backupRecordRepository = backupRepo,
-            runRepository = runRepo,
-            runLogRepository = logRepo,
-            credentialStore = FakeCredentialStore("pw"),
-            mediaStoreDataSource = mediaDataSource,
+        val useCase = runUseCase(
+            plan = plan,
+            server = server,
+            backupRepo = backupRepo,
+            runRepo = runRepo,
+            logRepo = logRepo,
+            mediaDataSource = mediaDataSource,
             smbClient = smbClient,
-            nowEpochMs = { 1000L },
         )
 
         val result = useCase(plan.planId)
@@ -87,6 +75,113 @@ class RunPlanBackupUseCaseTest {
         assertTrue(logRepo.logs.any { it.message == "Run finished" })
     }
 
+    @Test
+    fun invoke_executesFolderPlanAndPreservesRelativePaths() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Folder",
+            sourceAlbum = "",
+            sourceType = "FOLDER",
+            folderPath = "content://tree/folder",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val folderItems = listOf(
+            MediaImageItem(
+                mediaId = "content://tree/folder/item-1",
+                bucketId = "Folder",
+                displayName = "old.jpg",
+                mimeType = "image/jpeg",
+                dateTakenEpochMs = 1_700_000_000_000,
+                sizeBytes = 4,
+                relativePath = "Trips",
+            ),
+            MediaImageItem(
+                mediaId = "content://tree/folder/item-2",
+                bucketId = "Folder",
+                displayName = "new.jpg",
+                mimeType = "image/jpeg",
+                dateTakenEpochMs = 1_700_000_000_100,
+                sizeBytes = 4,
+                relativePath = "Trips/2025",
+            ),
+        )
+
+        val backupRepo = FakeBackupRecordRepository(existingMediaItemId = "content://tree/folder/item-1")
+        val smbClient = FakeSmbClient()
+
+        val result = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = backupRepo,
+            runRepo = FakeRunRepository(),
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(
+                albumItems = emptyList(),
+                folderItems = folderItems,
+            ),
+            smbClient = smbClient,
+        )(plan.planId)
+
+        assertEquals("SUCCESS", result.status)
+        assertEquals(1, result.uploadedCount)
+        assertEquals(1, result.skippedCount)
+        assertEquals(0, result.failedCount)
+        assertEquals("photos/Trips/2025/new.jpg", smbClient.uploadedPaths.single())
+        assertTrue(backupRepo.createdRecords.any { it.mediaItemId == "content://tree/folder/item-2" })
+    }
+
+    @Test
+    fun invoke_marksFullDeviceRunPartialWhenSharedRootsFail() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Phone",
+            sourceAlbum = "",
+            sourceType = "FULL_DEVICE",
+            folderPath = "FULL_DEVICE_SHARED_STORAGE",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val scan = FullDeviceScanResult(
+            items = listOf(
+                MediaImageItem(
+                    mediaId = "file:///storage/emulated/0/DCIM/Camera/pic.jpg",
+                    bucketId = "DCIM",
+                    displayName = "pic.jpg",
+                    mimeType = "image/jpeg",
+                    dateTakenEpochMs = 1_700_000_000_000,
+                    sizeBytes = 4,
+                    relativePath = "DCIM/Camera",
+                ),
+            ),
+            inaccessibleRoots = listOf("Documents (permission denied)"),
+        )
+
+        val runRepo = FakeRunRepository()
+        val result = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = runRepo,
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(
+                albumItems = emptyList(),
+                fullDeviceScanResult = scan,
+            ),
+            smbClient = FakeSmbClient(),
+        )(plan.planId)
+
+        assertEquals("PARTIAL", result.status)
+        assertEquals(1, result.uploadedCount)
+        assertEquals(0, result.skippedCount)
+        assertEquals(1, result.failedCount)
+        assertEquals("Skipped inaccessible shared-storage location: Documents (permission denied)", result.summaryError)
+        assertEquals("PARTIAL", runRepo.updatedRuns.last().status)
+    }
 
     @Test
     fun invoke_returnsFailedWhenMediaScanThrows() = runBlocking {
@@ -99,37 +194,25 @@ class RunPlanBackupUseCaseTest {
             filenamePattern = "",
             enabled = true,
         )
-        val server = ServerEntity(
-            serverId = 20,
-            name = "NAS",
-            host = "host",
-            shareName = "share",
-            basePath = "photos",
-            domain = "",
-            username = "user",
-            credentialAlias = "alias",
-        )
 
-        val useCase = RunPlanBackupUseCase(
-            planRepository = FakePlanRepository(plan),
-            serverRepository = FakeServerRepository(server),
-            backupRecordRepository = FakeBackupRecordRepository(existingMediaItemId = "none"),
-            runRepository = FakeRunRepository(),
-            runLogRepository = FakeRunLogRepository(),
-            credentialStore = FakeCredentialStore("pw"),
-            mediaStoreDataSource = FakeMediaStoreDataSource(emptyList(), throwOnScan = true),
+        val result = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = FakeRunRepository(),
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(
+                albumItems = emptyList(),
+                throwOnAlbumScan = true,
+            ),
             smbClient = FakeSmbClient(),
-            nowEpochMs = { 1000L },
-        )
-
-        val result = useCase(plan.planId)
+        )(plan.planId)
 
         assertEquals("FAILED", result.status)
         assertEquals(0, result.uploadedCount)
         assertEquals(0, result.skippedCount)
         assertEquals(1, result.failedCount)
     }
-
 
     @Test
     fun invoke_logsAbortReasonWhenPlanMissing() = runBlocking {
@@ -141,23 +224,12 @@ class RunPlanBackupUseCaseTest {
                 override suspend fun updatePlan(plan: PlanEntity) = Unit
                 override suspend fun deletePlan(planId: Long) = Unit
             },
-            serverRepository = FakeServerRepository(
-                ServerEntity(
-                    serverId = 1,
-                    name = "s",
-                    host = "h",
-                    shareName = "sh",
-                    basePath = "b",
-                    domain = "",
-                    username = "u",
-                    credentialAlias = "a",
-                ),
-            ),
+            serverRepository = FakeServerRepository(baseServer(serverId = 1)),
             backupRecordRepository = FakeBackupRecordRepository(existingMediaItemId = "none"),
             runRepository = FakeRunRepository(),
             runLogRepository = FakeRunLogRepository(),
             credentialStore = FakeCredentialStore("pw"),
-            mediaStoreDataSource = FakeMediaStoreDataSource(emptyList()),
+            mediaStoreDataSource = FakeMediaStoreDataSource(albumItems = emptyList()),
             smbClient = FakeSmbClient(),
             nowEpochMs = { 1000L },
         )
@@ -167,47 +239,33 @@ class RunPlanBackupUseCaseTest {
         assertEquals("FAILED", result.status)
     }
 
-
     @Test
-    fun invoke_returnsExplicitSummaryForUnsupportedSourceMode() = runBlocking {
+    fun invoke_returnsFailedForUnsupportedSourceType() = runBlocking {
         val plan = PlanEntity(
             planId = 10,
-            name = "Folder",
+            name = "Unknown",
             sourceAlbum = "",
-            sourceType = "FOLDER",
-            folderPath = "/storage/emulated/0/DCIM",
+            sourceType = "CUSTOM",
+            folderPath = "",
             serverId = 20,
             directoryTemplate = "",
             filenamePattern = "",
             enabled = true,
         )
-        val server = ServerEntity(
-            serverId = 20,
-            name = "NAS",
-            host = "host",
-            shareName = "share",
-            basePath = "photos",
-            domain = "",
-            username = "user",
-            credentialAlias = "alias",
-        )
 
-        val result = RunPlanBackupUseCase(
-            planRepository = FakePlanRepository(plan),
-            serverRepository = FakeServerRepository(server),
-            backupRecordRepository = FakeBackupRecordRepository(existingMediaItemId = "none"),
-            runRepository = FakeRunRepository(),
-            runLogRepository = FakeRunLogRepository(),
-            credentialStore = FakeCredentialStore("pw"),
-            mediaStoreDataSource = FakeMediaStoreDataSource(emptyList()),
+        val result = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = FakeRunRepository(),
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(albumItems = emptyList()),
             smbClient = FakeSmbClient(),
-            nowEpochMs = { 1000L },
         )(plan.planId)
 
         assertEquals("FAILED", result.status)
-        assertEquals("Only album-based plans are supported in Phase 5.", result.summaryError)
+        assertEquals("Unsupported source mode: CUSTOM.", result.summaryError)
     }
-
 
     @Test
     fun render_appliesTemplateWhenAlbumTemplatingEnabled() {
@@ -233,11 +291,59 @@ class RunPlanBackupUseCaseTest {
     }
 
     @Test
+    fun renderPreservingSourcePath_sanitizesRelativeSegments() {
+        val rendered = PathRenderer.renderPreservingSourcePath(
+            basePath = "archive",
+            mediaItem = MediaImageItem(
+                mediaId = "file:///storage/emulated/0/DCIM/cam<era>/clip.mp4",
+                bucketId = "DCIM",
+                displayName = "clip?.mp4",
+                mimeType = "video/mp4",
+                dateTakenEpochMs = null,
+                sizeBytes = 1024,
+                relativePath = "DCIM/cam<era>",
+            ),
+        )
+
+        assertEquals("archive/DCIM/cam_era_/clip_.mp4", rendered)
+    }
+
+    @Test
     fun sanitizeSegment_replacesIllegalCharacters() {
         val sanitized = PathRenderer.sanitizeSegment("cam<era>:name?.jpg")
-
         assertEquals("cam_era__name_.jpg", sanitized)
     }
+
+    private fun runUseCase(
+        plan: PlanEntity,
+        server: ServerEntity,
+        backupRepo: FakeBackupRecordRepository,
+        runRepo: FakeRunRepository,
+        logRepo: FakeRunLogRepository,
+        mediaDataSource: FakeMediaStoreDataSource,
+        smbClient: FakeSmbClient,
+    ) = RunPlanBackupUseCase(
+        planRepository = FakePlanRepository(plan),
+        serverRepository = FakeServerRepository(server),
+        backupRecordRepository = backupRepo,
+        runRepository = runRepo,
+        runLogRepository = logRepo,
+        credentialStore = FakeCredentialStore("pw"),
+        mediaStoreDataSource = mediaDataSource,
+        smbClient = smbClient,
+        nowEpochMs = { 1000L },
+    )
+
+    private fun baseServer(serverId: Long = 20) = ServerEntity(
+        serverId = serverId,
+        name = "NAS",
+        host = "host",
+        shareName = "share",
+        basePath = "photos",
+        domain = "",
+        username = "user",
+        credentialAlias = "alias",
+    )
 
     private class FakePlanRepository(
         private val plan: PlanEntity,
@@ -286,20 +392,26 @@ class RunPlanBackupUseCaseTest {
 
     private class FakeRunRepository : RunRepository {
         val updatedRuns = mutableListOf<RunEntity>()
+
         override fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>> = flowOf(emptyList())
+
         override suspend fun createRun(run: RunEntity): Long = 5
+
         override suspend fun updateRun(run: RunEntity) {
             updatedRuns += run
         }
+
         override suspend fun latestRuns(limit: Int): List<RunEntity> = emptyList()
     }
 
     private class FakeRunLogRepository : RunLogRepository {
         val logs = mutableListOf<RunLogEntity>()
+
         override suspend fun createLog(log: RunLogEntity): Long {
             logs += log
             return logs.size.toLong()
         }
+
         override suspend fun logsForRun(runId: Long): List<RunLogEntity> = logs
     }
 
@@ -310,22 +422,47 @@ class RunPlanBackupUseCaseTest {
     }
 
     private class FakeMediaStoreDataSource(
-        private val items: List<MediaImageItem>,
-        private val throwOnScan: Boolean = false,
+        private val albumItems: List<MediaImageItem>,
+        private val folderItems: List<MediaImageItem> = emptyList(),
+        private val fullDeviceScanResult: FullDeviceScanResult = FullDeviceScanResult(emptyList()),
+        private val throwOnAlbumScan: Boolean = false,
+        private val throwOnFolderScan: Boolean = false,
+        private val throwOnFullDeviceScan: Boolean = false,
+        private val unreadableItemIds: Set<String> = emptySet(),
     ) : MediaStoreDataSource {
-        override suspend fun listAlbums(): List<MediaAlbum> = listOf(MediaAlbum("album-1", "Camera", items.size, null))
+        override suspend fun listAlbums(): List<MediaAlbum> =
+            listOf(MediaAlbum("album-1", "Camera", albumItems.size, null))
+
         override suspend fun listImagesForAlbum(bucketId: String): List<MediaImageItem> {
-            if (throwOnScan) error("permission denied")
-            return items
+            if (throwOnAlbumScan) error("permission denied")
+            return albumItems
         }
-        override suspend fun openImageStream(mediaId: String): InputStream? = ByteArrayInputStream(byteArrayOf(1, 2, 3))
+
+        override suspend fun listFilesForFolder(folderPathOrUri: String): List<MediaImageItem> {
+            if (throwOnFolderScan) error("folder denied")
+            return folderItems
+        }
+
+        override suspend fun scanFullDeviceSharedStorage(): FullDeviceScanResult {
+            if (throwOnFullDeviceScan) error("full-device denied")
+            return fullDeviceScanResult
+        }
+
+        override suspend fun openImageStream(mediaId: String): InputStream? =
+            openMediaStream(mediaId)
+
+        override suspend fun openMediaStream(mediaId: String): InputStream? {
+            return if (mediaId in unreadableItemIds) null else ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        }
+
         override fun imageContentUri(mediaId: String) = android.net.Uri.EMPTY
     }
 
     private class FakeSmbClient : SmbClient {
         val uploadedPaths = mutableListOf<String>()
 
-        override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = SmbConnectionResult(1)
+        override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
+            SmbConnectionResult(1)
 
         override suspend fun uploadFile(
             request: SmbConnectionRequest,

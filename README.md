@@ -1,13 +1,6 @@
-# NASBox (VaultPilot MVP)
+# NASBox - SMB File Backup
 
-NASBox is an Android app focused on **manual, archive-only photo backup** from local albums to SMB shares (SMB2/3).
-
-## MVP scope
-
-- Manual run only (no background scheduler in MVP)
-- Archive-only behavior (never delete remote or local files)
-- SMB2/3 remote target
-- Backup proof tracking to prevent duplicate uploads on re-run
+NASBox is an Android app for archiving shared-storage to local SMB shares (SMB2/3) with an intuitive interface. Developing it was an opportunity to test the latest Codex 5.3 and actually get something I needed. Can't guarantee the absence of bugs but core functionality seems okay. Feel free to get involved.
 
 ## Current status
 

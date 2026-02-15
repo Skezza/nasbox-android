@@ -65,9 +65,11 @@ class PlansViewModel(
             PlanListItemUiState(
                 planId = plan.planId,
                 name = plan.name,
+                sourceType = sourceType,
                 sourceSummary = sourceSummary,
                 serverName = serverName,
                 enabled = plan.enabled,
+                includeVideos = plan.includeVideos,
                 useAlbumTemplating = plan.useAlbumTemplating,
                 template = plan.directoryTemplate,
                 filenamePattern = plan.filenamePattern,
@@ -273,9 +275,11 @@ class PlansViewModel(
 data class PlanListItemUiState(
     val planId: Long,
     val name: String,
+    val sourceType: PlanSourceType,
     val sourceSummary: String,
     val serverName: String,
     val enabled: Boolean,
+    val includeVideos: Boolean,
     val useAlbumTemplating: Boolean,
     val template: String,
     val filenamePattern: String,

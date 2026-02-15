@@ -14,6 +14,7 @@ coroutines = "1.8.1"
 smbj = "0.14.0"
 jmdns = "3.5.8"
 dcerpc = "0.12.13"
+documentfile = "1.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -44,6 +45,7 @@ androidx-test-core = { group = "androidx.test", name = "core", version = "1.6.1"
 smbj = { group = "com.hierynomus", name = "smbj", version.ref = "smbj" }
 jmdns = { group = "org.jmdns", name = "jmdns", version.ref = "jmdns" }
 dcerpc = { group = "com.rapid7.client", name = "dcerpc", version.ref = "dcerpc" }
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

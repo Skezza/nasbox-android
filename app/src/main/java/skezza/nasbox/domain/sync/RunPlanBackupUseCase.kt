@@ -97,7 +97,8 @@ class RunPlanBackupUseCase(
             )
         }
 
-        if (plan.sourceType != SOURCE_TYPE_ALBUM) {
+        val sourceType = normalizeSourceType(plan.sourceType)
+        if (sourceType == null) {
             log(SEVERITY_ERROR, "Run aborted: unsupported source type", "sourceType=${plan.sourceType}")
             return@withContext finalizeRun(
                 runId = runId,
@@ -107,7 +108,7 @@ class RunPlanBackupUseCase(
                 uploaded = 0,
                 skipped = 0,
                 failed = 1,
-                summaryError = "Only album-based plans are supported in Phase 5.",
+                summaryError = "Unsupported source mode: ${plan.sourceType}.",
                 status = STATUS_FAILED,
                 log = ::log,
             )
@@ -154,44 +155,131 @@ class RunPlanBackupUseCase(
             password = password,
         )
 
+        log(
+            SEVERITY_INFO,
+            "Resolved destination",
+            "host=${server.host} share=${server.shareName} basePath=${server.basePath} sourceType=$sourceType",
+        )
+        if (sourceType == SOURCE_TYPE_ALBUM && plan.useAlbumTemplating) {
+            log(SEVERITY_INFO, "Template configuration", "dir=${plan.directoryTemplate} file=${plan.filenamePattern}")
+        }
+
         val albumDisplayName = runCatching {
             mediaStoreDataSource.listAlbums().firstOrNull { it.bucketId == plan.sourceAlbum }?.displayName
         }.getOrNull().orEmpty().ifBlank { plan.sourceAlbum }
 
-        log(
-            SEVERITY_INFO,
-            "Resolved destination",
-            "host=${server.host} share=${server.shareName} basePath=${server.basePath} templating=${plan.useAlbumTemplating}",
-        )
-        if (plan.useAlbumTemplating) {
-            log(SEVERITY_INFO, "Template configuration", "dir=${plan.directoryTemplate} file=${plan.filenamePattern}")
+        val scanResult = when (sourceType) {
+            SOURCE_TYPE_ALBUM -> {
+                runCatching {
+                    SourceScanResult(
+                        items = mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum),
+                    )
+                }.getOrElse { throwable ->
+                    val message = "Unable to scan local media. Check photo permission and album availability."
+                    log(SEVERITY_ERROR, message, throwable.message)
+                    return@withContext finalizeRun(
+                        runId = runId,
+                        planId = planId,
+                        startedAt = startedAt,
+                        scanned = 0,
+                        uploaded = 0,
+                        skipped = 0,
+                        failed = 1,
+                        summaryError = message,
+                        status = STATUS_FAILED,
+                        log = ::log,
+                    )
+                }
+            }
+
+            SOURCE_TYPE_FOLDER -> {
+                if (plan.folderPath.isBlank()) {
+                    val message = "Folder source path is missing. Re-save this plan."
+                    log(SEVERITY_ERROR, "Run aborted: folder source path missing")
+                    return@withContext finalizeRun(
+                        runId = runId,
+                        planId = planId,
+                        startedAt = startedAt,
+                        scanned = 0,
+                        uploaded = 0,
+                        skipped = 0,
+                        failed = 1,
+                        summaryError = message,
+                        status = STATUS_FAILED,
+                        log = ::log,
+                    )
+                }
+
+                log(SEVERITY_INFO, "Scanning folder source", "folderPath=${plan.folderPath}")
+                runCatching {
+                    SourceScanResult(
+                        items = mediaStoreDataSource.listFilesForFolder(plan.folderPath),
+                    )
+                }.getOrElse { throwable ->
+                    val message = "Unable to scan selected folder source. Confirm access to the selected folder."
+                    log(SEVERITY_ERROR, message, throwable.message)
+                    return@withContext finalizeRun(
+                        runId = runId,
+                        planId = planId,
+                        startedAt = startedAt,
+                        scanned = 0,
+                        uploaded = 0,
+                        skipped = 0,
+                        failed = 1,
+                        summaryError = message,
+                        status = STATUS_FAILED,
+                        log = ::log,
+                    )
+                }
+            }
+
+            SOURCE_TYPE_FULL_DEVICE -> {
+                log(SEVERITY_INFO, "Scanning shared-storage roots for full-device backup")
+                runCatching {
+                    val fullDevice = mediaStoreDataSource.scanFullDeviceSharedStorage()
+                    SourceScanResult(
+                        items = fullDevice.items,
+                        warnings = fullDevice.inaccessibleRoots.map { "Skipped inaccessible shared-storage location: $it" },
+                    )
+                }.getOrElse { throwable ->
+                    val message = "Unable to scan shared storage for full-device backup."
+                    log(SEVERITY_ERROR, message, throwable.message)
+                    return@withContext finalizeRun(
+                        runId = runId,
+                        planId = planId,
+                        startedAt = startedAt,
+                        scanned = 0,
+                        uploaded = 0,
+                        skipped = 0,
+                        failed = 1,
+                        summaryError = message,
+                        status = STATUS_FAILED,
+                        log = ::log,
+                    )
+                }
+            }
+
+            else -> error("Unexpected source type: $sourceType")
         }
 
-        val items = runCatching { mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum) }
-            .getOrElse { throwable ->
-                val message = "Unable to scan local media. Check photo permission and album availability."
-                log(SEVERITY_ERROR, message, throwable.message)
-                return@withContext finalizeRun(
-                    runId = runId,
-                    planId = planId,
-                    startedAt = startedAt,
-                    scanned = 0,
-                    uploaded = 0,
-                    skipped = 0,
-                    failed = 1,
-                    summaryError = message,
-                    status = STATUS_FAILED,
-                    log = ::log,
-                )
-            }
         var uploadedCount = 0
         var skippedCount = 0
         var failedCount = 0
         var summaryError: String? = null
 
-        log(SEVERITY_INFO, "Scan complete", "${items.size} items discovered")
+        scanResult.warnings.forEach { warning ->
+            failedCount += 1
+            summaryError = summaryError ?: warning
+            log(SEVERITY_ERROR, warning)
+        }
 
-        for (item in items) {
+        log(
+            SEVERITY_INFO,
+            "Scan complete",
+            "source=$sourceType discovered=${scanResult.items.size} warnings=${scanResult.warnings.size}",
+        )
+
+        for (item in scanResult.items) {
             val record = backupRecordRepository.findByPlanAndMediaItem(planId, item.mediaId)
             if (record != null) {
                 skippedCount += 1
@@ -199,19 +287,26 @@ class RunPlanBackupUseCase(
                 continue
             }
 
-            val remotePath = PathRenderer.render(
-                basePath = server.basePath,
-                directoryTemplate = plan.directoryTemplate,
-                filenamePattern = plan.filenamePattern,
-                mediaItem = item,
-                fallbackAlbumToken = albumDisplayName,
-                useAlbumTemplating = plan.useAlbumTemplating,
-            )
+            val remotePath = if (sourceType == SOURCE_TYPE_ALBUM) {
+                PathRenderer.render(
+                    basePath = server.basePath,
+                    directoryTemplate = plan.directoryTemplate,
+                    filenamePattern = plan.filenamePattern,
+                    mediaItem = item,
+                    fallbackAlbumToken = albumDisplayName,
+                    useAlbumTemplating = plan.useAlbumTemplating,
+                )
+            } else {
+                PathRenderer.renderPreservingSourcePath(
+                    basePath = server.basePath,
+                    mediaItem = item,
+                )
+            }
 
-            val stream = mediaStoreDataSource.openImageStream(item.mediaId)
+            val stream = mediaStoreDataSource.openMediaStream(item.mediaId)
             if (stream == null) {
                 failedCount += 1
-                val message = "Unable to read local media item ${item.mediaId}."
+                val message = "Unable to read source item ${item.mediaId}."
                 summaryError = summaryError ?: message
                 log(SEVERITY_ERROR, message)
                 continue
@@ -269,7 +364,7 @@ class RunPlanBackupUseCase(
             runId = runId,
             planId = planId,
             startedAt = startedAt,
-            scanned = items.size,
+            scanned = scanResult.items.size,
             uploaded = uploadedCount,
             skipped = skippedCount,
             failed = failedCount,
@@ -307,8 +402,30 @@ class RunPlanBackupUseCase(
             ),
         )
         log(SEVERITY_INFO, "Run finished", "status=$status uploaded=$uploaded skipped=$skipped failed=$failed")
-        return RunExecutionResult(runId = runId, status = status, uploadedCount = uploaded, skippedCount = skipped, failedCount = failed, summaryError = summaryError)
+        return RunExecutionResult(
+            runId = runId,
+            status = status,
+            uploadedCount = uploaded,
+            skippedCount = skipped,
+            failedCount = failed,
+            summaryError = summaryError,
+        )
     }
+
+    private fun normalizeSourceType(rawSourceType: String): String? {
+        val normalized = rawSourceType.trim().uppercase(Locale.US)
+        return when (normalized) {
+            SOURCE_TYPE_ALBUM -> SOURCE_TYPE_ALBUM
+            SOURCE_TYPE_FOLDER -> SOURCE_TYPE_FOLDER
+            SOURCE_TYPE_FULL_DEVICE -> SOURCE_TYPE_FULL_DEVICE
+            else -> null
+        }
+    }
+
+    private data class SourceScanResult(
+        val items: List<MediaImageItem>,
+        val warnings: List<String> = emptyList(),
+    )
 
     companion object {
         private const val STATUS_RUNNING = "RUNNING"
@@ -316,10 +433,11 @@ class RunPlanBackupUseCase(
         private const val STATUS_PARTIAL = "PARTIAL"
         private const val STATUS_FAILED = "FAILED"
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
+        private const val SOURCE_TYPE_FOLDER = "FOLDER"
+        private const val SOURCE_TYPE_FULL_DEVICE = "FULL_DEVICE"
         private const val SEVERITY_INFO = "INFO"
         private const val SEVERITY_ERROR = "ERROR"
         private const val LOG_TAG = "NasBoxRun"
-
     }
 }
 
@@ -372,6 +490,24 @@ internal object PathRenderer {
         return pathSegments.joinToString("/") { it.trim('/') }
     }
 
+    fun renderPreservingSourcePath(
+        basePath: String,
+        mediaItem: MediaImageItem,
+    ): String {
+        val extension = extension(mediaItem)
+        val fallbackNameStem = mediaItem.mediaId
+            .substringAfterLast('/')
+            .substringAfterLast(':')
+            .substringBefore('?')
+            .ifBlank { "item_${sanitizeSegment(mediaItem.mediaId).takeLast(12)}" }
+        val fallbackName = "$fallbackNameStem.$extension"
+        val filename = sanitizeSegment(mediaItem.displayName.orEmpty().ifBlank { fallbackName })
+        val relativeDirectory = sanitizePath(mediaItem.relativePath.orEmpty())
+        return listOf(basePath, relativeDirectory, filename)
+            .filter { it.isNotBlank() }
+            .joinToString("/") { it.trim('/') }
+    }
+
     private fun renderTokens(template: String, values: Map<String, String>): String {
         var output = template
         values.forEach { (key, value) ->
@@ -408,7 +544,6 @@ internal object PathRenderer {
         }
     }
 }
-
 
 private fun Throwable?.toLogDetail(): String? {
     if (this == null) return null
