@@ -40,6 +40,7 @@ class RunPlanBackupUseCase(
     ): RunExecutionResult = withContext(Dispatchers.IO) {
         val startedAt = nowEpochMs()
         val normalizedTriggerSource = normalizeTriggerSource(triggerSource)
+        finalizePriorActiveRunsForPlan(planId)
         val runId = runRepository.createRun(
             RunEntity(
                 planId = planId,
@@ -394,7 +395,7 @@ class RunPlanBackupUseCase(
                 continue
             }
 
-            val remotePath = if (sourceType == SOURCE_TYPE_ALBUM) {
+            val pathResult = if (sourceType == SOURCE_TYPE_ALBUM) {
                 PathRenderer.render(
                     basePath = server.basePath,
                     directoryTemplate = plan.directoryTemplate,
@@ -409,10 +410,19 @@ class RunPlanBackupUseCase(
                     mediaItem = item,
                 )
             }
+            val remotePath = pathResult.path
+            if (pathResult.usedDefaultTokens.isNotEmpty()) {
+                log(
+                    SEVERITY_INFO,
+                    "Template fallback used",
+                    "tokens=${pathResult.usedDefaultTokens.sorted().joinToString(",")}",
+                )
+            }
+            val maskedDestination = maskRemotePath(remotePath)
             log(
                 SEVERITY_INFO,
                 "Processing item",
-                "mediaId=${item.mediaId} displayName=${item.displayName.orEmpty()} remotePath=$remotePath",
+                "mediaId=${item.mediaId} displayName=${item.displayName.orEmpty()} dest=$maskedDestination",
             )
 
             val stream = mediaStoreDataSource.openMediaStream(item.mediaId)
@@ -450,7 +460,7 @@ class RunPlanBackupUseCase(
                 }
                 if (recordResult.isSuccess) {
                     uploadedCount += 1
-                    log(SEVERITY_INFO, "Uploaded item", "mediaId=${item.mediaId} remotePath=$remotePath")
+                    log(SEVERITY_INFO, "Uploaded item", "mediaId=${item.mediaId} dest=${maskRemotePath(remotePath)}")
                 } else {
                     failedCount += 1
                     val recordError = recordResult.exceptionOrNull()
@@ -491,6 +501,17 @@ class RunPlanBackupUseCase(
             triggerSource = normalizedTriggerSource,
             log = ::log,
         )
+    }
+
+    private fun maskRemotePath(path: String): String {
+        val normalized = path.replace('\\', '/').split('/').map { it.trim() }.filter { it.isNotBlank() }
+        if (normalized.isEmpty()) return ""
+        val lastSegments = normalized.takeLast(2)
+        return if (lastSegments.size < normalized.size) {
+            ".../${lastSegments.joinToString("/")}"
+        } else {
+            lastSegments.joinToString("/")
+        }
     }
 
     private suspend fun finalizeRun(
@@ -560,6 +581,51 @@ class RunPlanBackupUseCase(
     private suspend fun readPersistedStatus(runId: Long): String? =
         runRepository.getRun(runId)?.status?.trim()?.uppercase(Locale.US)
 
+    private suspend fun finalizePriorActiveRunsForPlan(planId: Long) {
+        val now = nowEpochMs()
+        val activeRunsForPlan = runRepository
+            .latestRunsByStatuses(MAX_ACTIVE_RUN_LOOKBACK, ACTIVE_RUN_STATUSES)
+            .asSequence()
+            .filter { it.planId == planId && it.finishedAtEpochMs == null }
+            .toList()
+        if (activeRunsForPlan.isEmpty()) return
+
+        activeRunsForPlan.forEach { existingRun ->
+            val normalizedStatus = existingRun.status.trim().uppercase(Locale.US)
+            val finalStatus = if (normalizedStatus == RunStatus.CANCEL_REQUESTED) {
+                RunStatus.CANCELED
+            } else {
+                RunStatus.INTERRUPTED
+            }
+            val summary = existingRun.summaryError ?: if (finalStatus == RunStatus.CANCELED) {
+                DEFAULT_CANCELED_SUMMARY
+            } else {
+                DEFAULT_INTERRUPTED_SUMMARY
+            }
+            runRepository.updateRun(
+                existingRun.copy(
+                    status = finalStatus,
+                    finishedAtEpochMs = now,
+                    heartbeatAtEpochMs = now,
+                    summaryError = summary,
+                ),
+            )
+            runLogRepository.createLog(
+                RunLogEntity(
+                    runId = existingRun.runId,
+                    timestampEpochMs = now,
+                    severity = if (finalStatus == RunStatus.CANCELED) SEVERITY_INFO else SEVERITY_ERROR,
+                    message = if (finalStatus == RunStatus.CANCELED) {
+                        "Run finalized as canceled"
+                    } else {
+                        "Run marked as interrupted"
+                    },
+                    detail = "A newer run attempt for this job started before this run completed.",
+                ),
+            )
+        }
+    }
+
     companion object {
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
         private const val SOURCE_TYPE_FOLDER = "FOLDER"
@@ -569,6 +635,12 @@ class RunPlanBackupUseCase(
         private const val PROGRESS_LOG_INTERVAL = 10
         private const val LOG_TAG = "NasBoxRun"
         private const val DEFAULT_CANCELED_SUMMARY = "Run canceled by user."
+        private const val DEFAULT_INTERRUPTED_SUMMARY = "Run interrupted before completion."
+        private const val MAX_ACTIVE_RUN_LOOKBACK = 200
+        private val ACTIVE_RUN_STATUSES = setOf(
+            RunStatus.RUNNING,
+            RunStatus.CANCEL_REQUESTED,
+        )
     }
 }
 
@@ -584,6 +656,7 @@ data class RunExecutionResult(
 internal object PathRenderer {
     private const val DEFAULT_TEMPLATE = "{year}/{month}/{day}"
     private const val DEFAULT_FILENAME_PATTERN = "{timestamp}_{mediaId}.{ext}"
+    private const val UNKNOWN_TOKEN = "unknown"
     private val ILLEGAL_PATH_CHARS = setOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
 
     fun render(
@@ -593,38 +666,46 @@ internal object PathRenderer {
         mediaItem: MediaImageItem,
         fallbackAlbumToken: String,
         useAlbumTemplating: Boolean,
-    ): String {
+    ): PathRenderResult {
+        val normalizedBase = joinSegments(basePath)
+        val usedDefaults = mutableSetOf<String>()
+
         if (!useAlbumTemplating) {
-            val filename = sanitizeSegment(mediaItem.displayName.orEmpty().ifBlank { "${mediaItem.mediaId}.${extension(mediaItem)}" })
-            val pathSegments = listOf(basePath, sanitizeSegment(fallbackAlbumToken), filename).filter { it.isNotBlank() }
-            return pathSegments.joinToString("/") { it.trim('/') }
+            val albumSegment = sanitizeWithFallback(fallbackAlbumToken, "album", usedDefaults)
+            val filename = sanitizeSegment(
+                mediaItem.displayName.orEmpty().ifBlank { "${mediaItem.mediaId}.${extension(mediaItem)}" },
+            )
+            val path = joinSegments(normalizedBase, albumSegment, filename)
+            return PathRenderResult(path = path, usedDefaultTokens = usedDefaults)
         }
 
         val safeExt = extension(mediaItem)
         val hasDate = mediaItem.dateTakenEpochMs != null
         val date = Date(mediaItem.dateTakenEpochMs ?: 0L)
-        val values = mapOf(
-            "year" to if (hasDate) format(date, "yyyy") else "unknown",
-            "month" to if (hasDate) format(date, "MM") else "unknown",
-            "day" to if (hasDate) format(date, "dd") else "unknown",
-            "time" to if (hasDate) format(date, "HHmmss") else "unknown",
-            "timestamp" to if (hasDate) format(date, "yyyyMMdd_HHmmss") else "unknown",
-            "album" to sanitizeSegment(fallbackAlbumToken),
-            "mediaId" to sanitizeSegment(mediaItem.mediaId),
-            "ext" to sanitizeSegment(safeExt),
-            "device" to sanitizeSegment(Build.MODEL ?: "android"),
-        )
+        val values = mutableMapOf<String, String>()
+        values["year"] = fetchDateToken(hasDate) { format(date, "yyyy") }.also { if (it == UNKNOWN_TOKEN) usedDefaults += "year" }
+        values["month"] = fetchDateToken(hasDate) { format(date, "MM") }.also { if (it == UNKNOWN_TOKEN) usedDefaults += "month" }
+        values["day"] = fetchDateToken(hasDate) { format(date, "dd") }.also { if (it == UNKNOWN_TOKEN) usedDefaults += "day" }
+        values["time"] = fetchDateToken(hasDate) { format(date, "HHmmss") }.also { if (it == UNKNOWN_TOKEN) usedDefaults += "time" }
+        values["timestamp"] =
+            fetchDateToken(hasDate) { format(date, "yyyyMMdd_HHmmss") }.also { if (it == UNKNOWN_TOKEN) usedDefaults += "timestamp" }
+        val albumValue = sanitizeWithFallback(fallbackAlbumToken, "album", usedDefaults)
+        values["album"] = albumValue
+        values["mediaId"] = sanitizeSegment(mediaItem.mediaId)
+        values["ext"] = sanitizeSegment(safeExt)
+        val deviceValue = sanitizeWithFallback(Build.MODEL, "device", usedDefaults, fallback = "android")
+        values["device"] = deviceValue
 
-        val renderedDirectory = sanitizePath(renderTokens(directoryTemplate.ifBlank { DEFAULT_TEMPLATE }, values))
-        val renderedName = sanitizeSegment(renderTokens(filenamePattern.ifBlank { DEFAULT_FILENAME_PATTERN }, values))
-        val pathSegments = listOf(basePath, renderedDirectory, renderedName).filter { it.isNotBlank() }
-        return pathSegments.joinToString("/") { it.trim('/') }
+        val renderedDirectory = sanitizePath(renderTokens(directoryTemplate.ifBlank { DEFAULT_TEMPLATE }, values, usedDefaults))
+        val renderedName = sanitizeSegment(renderTokens(filenamePattern.ifBlank { DEFAULT_FILENAME_PATTERN }, values, usedDefaults))
+        val path = joinSegments(normalizedBase, renderedDirectory, renderedName)
+        return PathRenderResult(path = path, usedDefaultTokens = usedDefaults)
     }
 
     fun renderPreservingSourcePath(
         basePath: String,
         mediaItem: MediaImageItem,
-    ): String {
+    ): PathRenderResult {
         val extension = extension(mediaItem)
         val fallbackNameStem = mediaItem.mediaId
             .substringAfterLast('/')
@@ -634,17 +715,48 @@ internal object PathRenderer {
         val fallbackName = "$fallbackNameStem.$extension"
         val filename = sanitizeSegment(mediaItem.displayName.orEmpty().ifBlank { fallbackName })
         val relativeDirectory = sanitizePath(mediaItem.relativePath.orEmpty())
-        return listOf(basePath, relativeDirectory, filename)
-            .filter { it.isNotBlank() }
-            .joinToString("/") { it.trim('/') }
+        val path = joinSegments(basePath, relativeDirectory, filename)
+        return PathRenderResult(path = path, usedDefaultTokens = emptySet())
     }
 
-    private fun renderTokens(template: String, values: Map<String, String>): String {
+    private fun fetchDateToken(hasDate: Boolean, valueProvider: () -> String): String =
+        if (hasDate) valueProvider() else UNKNOWN_TOKEN
+
+    private fun sanitizeWithFallback(
+        value: String?,
+        key: String,
+        usedDefaults: MutableSet<String>,
+        fallback: String = UNKNOWN_TOKEN,
+    ): String {
+        val input = value?.trim().orEmpty()
+        return if (input.isBlank()) {
+            usedDefaults += key
+            sanitizeSegment(fallback)
+        } else {
+            sanitizeSegment(input)
+        }
+    }
+
+    private fun renderTokens(template: String, values: Map<String, String>, usedDefaults: MutableSet<String>): String {
         var output = template
         values.forEach { (key, value) ->
             output = output.replace("{$key}", value)
         }
+        Regex("\\{([^}]+)\\}").findAll(output).forEach { match ->
+            val token = match.groupValues[1]
+            usedDefaults += token
+        }
+        output = output.replace(Regex("\\{[^}]+\\}"), UNKNOWN_TOKEN)
         return output
+    }
+
+    private fun joinSegments(vararg segments: String): String {
+        return segments
+            .asSequence()
+            .flatMap { it.split('/', '\\').asSequence().map(String::trim) }
+            .filter { it.isNotBlank() }
+            .map { sanitizeSegment(it) }
+            .joinToString("/")
     }
 
     private fun extension(item: MediaImageItem): String {
@@ -661,7 +773,7 @@ internal object PathRenderer {
         SimpleDateFormat(pattern, Locale.US).format(date)
 
     internal fun sanitizeSegment(value: String): String {
-        val trimmed = value.trim().ifBlank { "unknown" }
+        val trimmed = value.trim().ifBlank { UNKNOWN_TOKEN }
         return buildString(trimmed.length) {
             trimmed.forEach { ch ->
                 append(
@@ -675,6 +787,11 @@ internal object PathRenderer {
         }
     }
 }
+
+internal data class PathRenderResult(
+    val path: String,
+    val usedDefaultTokens: Set<String>,
+)
 
 private fun Throwable?.toLogDetail(): String? {
     if (this == null) return null

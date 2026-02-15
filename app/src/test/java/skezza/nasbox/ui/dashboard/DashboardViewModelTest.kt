@@ -5,6 +5,7 @@ import java.util.TimeZone
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -27,6 +28,7 @@ import skezza.nasbox.data.repository.ServerRepository
 import skezza.nasbox.domain.sync.ReconcileStaleActiveRunsUseCase
 import skezza.nasbox.domain.sync.RunStatus
 import skezza.nasbox.domain.sync.StopRunUseCase
+import skezza.nasbox.ui.common.LoadState
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DashboardViewModelTest {
@@ -77,6 +79,19 @@ class DashboardViewModelTest {
         advanceUntilIdle()
 
         assertEquals(VaultHealthLevel.ATTENTION, harness.viewModel.uiState.value.vaultHealth.level)
+    }
+
+    @Test
+    fun uiState_planFlowError_setsErrorLoadState() = runTest {
+        val harness = buildHarness(planRepository = FailingPlanRepository())
+        advanceUntilIdle()
+
+        val state = harness.viewModel.uiState.value
+        assertTrue(state.loadState is LoadState.Error)
+        assertEquals(
+            "Unable to load dashboard data. Check your network or SMB configuration.",
+            state.errorMessage,
+        )
     }
 
     @Test
@@ -209,6 +224,7 @@ class DashboardViewModelTest {
 
     private fun buildHarness(
         plans: MutableStateFlow<List<PlanEntity>> = MutableStateFlow(emptyList()),
+        planRepository: PlanRepository = FakePlanRepository(plans),
         servers: MutableStateFlow<List<ServerEntity>> = MutableStateFlow(emptyList()),
         runs: MutableStateFlow<List<RunEntity>> = MutableStateFlow(emptyList()),
         recurrenceCalculator: PlanRecurrenceCalculator = PlanRecurrenceCalculator(TimeZone.getTimeZone("UTC")),
@@ -217,7 +233,7 @@ class DashboardViewModelTest {
         val runRepository = FakeRunRepository(runs)
         val runLogRepository = FakeRunLogRepository()
         val viewModel = DashboardViewModel(
-            planRepository = FakePlanRepository(plans),
+            planRepository = planRepository,
             serverRepository = FakeServerRepository(servers),
             runRepository = runRepository,
             stopRunUseCase = StopRunUseCase(
@@ -289,6 +305,14 @@ class DashboardViewModelTest {
         override fun observePlans(): Flow<List<PlanEntity>> = plans
         override suspend fun getPlan(planId: Long): PlanEntity? = plans.value.firstOrNull { it.planId == planId }
         override suspend fun createPlan(plan: PlanEntity): Long = plan.planId
+        override suspend fun updatePlan(plan: PlanEntity) = Unit
+        override suspend fun deletePlan(planId: Long) = Unit
+    }
+
+    private class FailingPlanRepository : PlanRepository {
+        override fun observePlans(): Flow<List<PlanEntity>> = flow { throw IllegalStateException("boom") }
+        override suspend fun getPlan(planId: Long): PlanEntity? = null
+        override suspend fun createPlan(plan: PlanEntity): Long = 0
         override suspend fun updatePlan(plan: PlanEntity) = Unit
         override suspend fun deletePlan(planId: Long) = Unit
     }

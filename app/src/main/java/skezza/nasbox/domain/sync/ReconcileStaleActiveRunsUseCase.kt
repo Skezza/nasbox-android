@@ -13,18 +13,26 @@ class ReconcileStaleActiveRunsUseCase(
     private val staleRunningAfterMs: Long = DEFAULT_STALE_RUNNING_AFTER_MS,
 ) {
 
-    suspend operator fun invoke(limit: Int = MAX_RECONCILE_RUNS): ReconcileStaleActiveRunsResult {
+    suspend operator fun invoke(
+        limit: Int = MAX_RECONCILE_RUNS,
+        forceFinalizeActive: Boolean = false,
+    ): ReconcileStaleActiveRunsResult {
         val now = nowEpochMs()
         val candidates = runRepository.latestRunsByStatuses(limit, ACTIVE_STATUSES)
         var canceledCount = 0
         var interruptedCount = 0
+        val latestActiveRunPerPlan = mutableSetOf<Long>()
 
         candidates.forEach { run ->
             if (run.finishedAtEpochMs != null) return@forEach
 
+            val isLatestRunForPlan = latestActiveRunPerPlan.add(run.planId)
             when (run.status.trim().uppercase(Locale.US)) {
                 RunStatus.CANCEL_REQUESTED -> {
-                    if (now - run.heartbeatAtEpochMs < staleCancelRequestedAfterMs) return@forEach
+                    val shouldFinalize = forceFinalizeActive ||
+                        !isLatestRunForPlan ||
+                        now - run.heartbeatAtEpochMs >= staleCancelRequestedAfterMs
+                    if (!shouldFinalize) return@forEach
                     runRepository.updateRun(
                         run.copy(
                             status = RunStatus.CANCELED,
@@ -46,7 +54,10 @@ class ReconcileStaleActiveRunsUseCase(
                 }
 
                 RunStatus.RUNNING -> {
-                    if (now - run.heartbeatAtEpochMs < staleRunningAfterMs) return@forEach
+                    val shouldFinalize = forceFinalizeActive ||
+                        !isLatestRunForPlan ||
+                        now - run.heartbeatAtEpochMs >= staleRunningAfterMs
+                    if (!shouldFinalize) return@forEach
                     runRepository.updateRun(
                         run.copy(
                             status = RunStatus.INTERRUPTED,

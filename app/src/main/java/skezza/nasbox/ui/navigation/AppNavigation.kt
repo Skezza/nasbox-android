@@ -1,5 +1,6 @@
 package skezza.nasbox.ui.navigation
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
@@ -11,9 +12,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -60,6 +63,8 @@ private enum class TopLevelDestination(
     VAULT(route = ROUTE_VAULT, label = "Servers", icon = Icons.Default.Lock),
 }
 
+private val topLevelDestinationRoutes = TopLevelDestination.entries.map { it.route }
+
 @Composable
 fun NasBoxApp(
     appContainer: AppContainer,
@@ -67,6 +72,10 @@ fun NasBoxApp(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+    val showBottomBar = currentDestination
+        ?.hierarchy
+        ?.any { it.route in topLevelDestinationRoutes }
+        ?: true
     val vaultViewModel: VaultViewModel = viewModel(
         factory = VaultViewModel.factory(
             serverRepository = appContainer.serverRepository,
@@ -104,128 +113,136 @@ fun NasBoxApp(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            NavigationBar {
-                TopLevelDestination.entries.forEach { destination ->
-                    val selected = currentDestination
-                        ?.hierarchy
-                        ?.any { it.route == destination.route } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(destination.icon, contentDescription = destination.label) },
-                        label = { Text(destination.label) },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            NavHost(
+                navController = navController,
+                startDestination = ROUTE_DASHBOARD,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                composable(ROUTE_DASHBOARD) {
+                    DashboardScreen(
+                        viewModel = dashboardViewModel,
+                        onOpenAudit = { navController.navigate(ROUTE_AUDIT) },
+                        onOpenRunAudit = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
+                        onOpenCurrentRunDetail = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
+                    )
+                }
+                composable(
+                    route = "$ROUTE_DASHBOARD_RUN/{runId}",
+                    arguments = listOf(navArgument("runId") { type = NavType.LongType }),
+                ) { backStackEntry ->
+                    val runId = backStackEntry.arguments?.getLong("runId") ?: 0L
+                    val runDetailViewModel: DashboardRunDetailViewModel = viewModel(
+                        key = "dashboardRunDetail-$runId",
+                        factory = DashboardRunDetailViewModel.factory(
+                            runId = runId,
+                            planRepository = appContainer.planRepository,
+                            runRepository = appContainer.runRepository,
+                            runLogRepository = appContainer.runLogRepository,
+                        ),
+                    )
+                    DashboardRunDetailScreen(
+                        viewModel = runDetailViewModel,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(ROUTE_PLANS) {
+                    PlansScreen(
+                        viewModel = plansViewModel,
+                        onAddPlan = { navController.navigate(ROUTE_PLAN_EDITOR) },
+                        onEditPlan = { planId -> navController.navigate("$ROUTE_PLAN_EDITOR/$planId") },
+                        onRunPlan = { planId -> plansViewModel.runPlanNow(planId) },
+                    )
+                }
+                composable(ROUTE_VAULT) {
+                    VaultScreen(
+                        viewModel = vaultViewModel,
+                        onAddServer = { navController.navigate(ROUTE_SERVER_EDITOR) },
+                        onEditServer = { serverId -> navController.navigate("$ROUTE_SERVER_EDITOR/$serverId") },
+                    )
+                }
+                composable(ROUTE_SERVER_EDITOR) {
+                    ServerEditorScreen(
+                        viewModel = vaultViewModel,
+                        serverId = null,
+                        onNavigateBack = { navController.popBackStack() },
+                    )
+                }
+                composable(ROUTE_PLAN_EDITOR) {
+                    PlanEditorScreen(
+                        viewModel = plansViewModel,
+                        planId = null,
+                        onNavigateBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = "$ROUTE_PLAN_EDITOR/{planId}",
+                    arguments = listOf(navArgument("planId") { type = NavType.LongType }),
+                ) { backStackEntry ->
+                    PlanEditorScreen(
+                        viewModel = plansViewModel,
+                        planId = backStackEntry.arguments?.getLong("planId"),
+                        onNavigateBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
+                    route = "$ROUTE_SERVER_EDITOR/{serverId}",
+                    arguments = listOf(navArgument("serverId") { type = NavType.LongType }),
+                ) { backStackEntry ->
+                    ServerEditorScreen(
+                        viewModel = vaultViewModel,
+                        serverId = backStackEntry.arguments?.getLong("serverId"),
+                        onNavigateBack = { navController.popBackStack() },
+                    )
+                }
+                composable(ROUTE_AUDIT) {
+                    AuditScreen(
+                        viewModel = auditViewModel,
+                        onBack = { navController.popBackStack() },
+                        onOpenRun = { runId -> navController.navigate("$ROUTE_AUDIT_RUN/$runId") },
+                    )
+                }
+                composable(
+                    route = "$ROUTE_AUDIT_RUN/{runId}",
+                    arguments = listOf(navArgument("runId") { type = NavType.LongType }),
+                ) { backStackEntry ->
+                    val runId = backStackEntry.arguments?.getLong("runId") ?: 0L
+                    AuditRunDetailScreen(
+                        viewModel = auditViewModel,
+                        runId = runId,
+                        onBack = { navController.popBackStack() },
                     )
                 }
             }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = ROUTE_DASHBOARD,
-            modifier = Modifier.padding(innerPadding),
-        ) {
-            composable(ROUTE_DASHBOARD) {
-                DashboardScreen(
-                    viewModel = dashboardViewModel,
-                    onOpenAudit = { navController.navigate(ROUTE_AUDIT) },
-                    onOpenRunAudit = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
-                    onOpenCurrentRunDetail = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
-                )
-            }
-            composable(
-                route = "$ROUTE_DASHBOARD_RUN/{runId}",
-                arguments = listOf(navArgument("runId") { type = NavType.LongType }),
-            ) { backStackEntry ->
-                val runId = backStackEntry.arguments?.getLong("runId") ?: 0L
-                val runDetailViewModel: DashboardRunDetailViewModel = viewModel(
-                    key = "dashboardRunDetail-$runId",
-                    factory = DashboardRunDetailViewModel.factory(
-                        runId = runId,
-                        planRepository = appContainer.planRepository,
-                        runRepository = appContainer.runRepository,
-                        runLogRepository = appContainer.runLogRepository,
-                    ),
-                )
-                DashboardRunDetailScreen(
-                    viewModel = runDetailViewModel,
-                    onBack = { navController.popBackStack() },
-                )
-            }
-            composable(ROUTE_PLANS) {
-                PlansScreen(
-                    viewModel = plansViewModel,
-                    onAddPlan = { navController.navigate(ROUTE_PLAN_EDITOR) },
-                    onEditPlan = { planId -> navController.navigate("$ROUTE_PLAN_EDITOR/$planId") },
-                    onRunPlan = { planId -> plansViewModel.runPlanNow(planId) },
-                )
-            }
-            composable(ROUTE_VAULT) {
-                VaultScreen(
-                    viewModel = vaultViewModel,
-                    onAddServer = { navController.navigate(ROUTE_SERVER_EDITOR) },
-                    onEditServer = { serverId -> navController.navigate("$ROUTE_SERVER_EDITOR/$serverId") },
-                )
-            }
-            composable(ROUTE_SERVER_EDITOR) {
-                ServerEditorScreen(
-                    viewModel = vaultViewModel,
-                    serverId = null,
-                    onNavigateBack = { navController.popBackStack() },
-                )
-            }
-            composable(ROUTE_PLAN_EDITOR) {
-                PlanEditorScreen(
-                    viewModel = plansViewModel,
-                    planId = null,
-                    onNavigateBack = { navController.popBackStack() },
-                )
-            }
-            composable(
-                route = "$ROUTE_PLAN_EDITOR/{planId}",
-                arguments = listOf(navArgument("planId") { type = NavType.LongType }),
-            ) { backStackEntry ->
-                PlanEditorScreen(
-                    viewModel = plansViewModel,
-                    planId = backStackEntry.arguments?.getLong("planId"),
-                    onNavigateBack = { navController.popBackStack() },
-                )
-            }
-            composable(
-                route = "$ROUTE_SERVER_EDITOR/{serverId}",
-                arguments = listOf(navArgument("serverId") { type = NavType.LongType }),
-            ) { backStackEntry ->
-                ServerEditorScreen(
-                    viewModel = vaultViewModel,
-                    serverId = backStackEntry.arguments?.getLong("serverId"),
-                    onNavigateBack = { navController.popBackStack() },
-                )
-            }
-            composable(ROUTE_AUDIT) {
-                AuditScreen(
-                    viewModel = auditViewModel,
-                    onBack = { navController.popBackStack() },
-                    onOpenRun = { runId -> navController.navigate("$ROUTE_AUDIT_RUN/$runId") },
-                )
-            }
-            composable(
-                route = "$ROUTE_AUDIT_RUN/{runId}",
-                arguments = listOf(navArgument("runId") { type = NavType.LongType }),
-            ) { backStackEntry ->
-                val runId = backStackEntry.arguments?.getLong("runId") ?: 0L
-                AuditRunDetailScreen(
-                    viewModel = auditViewModel,
-                    runId = runId,
-                    onBack = { navController.popBackStack() },
-                )
+            if (showBottomBar) {
+                NavigationBar(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                ) {
+                    TopLevelDestination.entries.forEach { destination ->
+                        val selected = currentDestination
+                            ?.hierarchy
+                            ?.any { it.route == destination.route } == true
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                navController.navigate(destination.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = { Icon(destination.icon, contentDescription = destination.label) },
+                            label = { Text(destination.label) },
+                        )
+                    }
+                }
             }
         }
     }

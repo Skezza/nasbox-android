@@ -1,7 +1,10 @@
 package skezza.nasbox
 
 import android.content.Context
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import skezza.nasbox.data.db.DatabaseProvider
 import skezza.nasbox.data.discovery.AndroidSmbServerDiscoveryScanner
 import skezza.nasbox.data.discovery.SmbServerDiscoveryScanner
@@ -34,6 +37,7 @@ import skezza.nasbox.domain.sync.MarkRunInterruptedUseCase
 import skezza.nasbox.domain.sync.ReconcileStaleActiveRunsUseCase
 import skezza.nasbox.domain.sync.RunPlanBackupUseCase
 import skezza.nasbox.domain.sync.StopRunUseCase
+import skezza.nasbox.work.RunPlanWorker
 
 class AppContainer(context: Context) {
     private val database = DatabaseProvider.get(context)
@@ -104,5 +108,27 @@ class AppContainer(context: Context) {
 
     suspend fun reconcileSchedulesOnStartup() {
         planScheduleCoordinator.reconcileSchedules()
+    }
+
+    suspend fun reconcileRunsOnStartup() {
+        val hasActiveQueueWorker = runCatching {
+            withContext(Dispatchers.IO) {
+                workManager
+                    .getWorkInfosForUniqueWork(EnqueuePlanRunUseCase.UNIQUE_RUN_QUEUE)
+                    .get()
+            }.any { workInfo ->
+                workInfo.tags.contains(RunPlanWorker::class.java.name) &&
+                    workInfo.state in ACTIVE_WORK_STATES
+            }
+        }.getOrDefault(false)
+        reconcileStaleActiveRunsUseCase(forceFinalizeActive = !hasActiveQueueWorker)
+    }
+
+    companion object {
+        private val ACTIVE_WORK_STATES = setOf(
+            WorkInfo.State.ENQUEUED,
+            WorkInfo.State.RUNNING,
+            WorkInfo.State.BLOCKED,
+        )
     }
 }

@@ -10,7 +10,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import skezza.nasbox.data.db.ServerEntity
@@ -21,6 +24,7 @@ import skezza.nasbox.domain.discovery.DiscoverSmbServersUseCase
 import skezza.nasbox.domain.smb.BrowseSmbDestinationUseCase
 import skezza.nasbox.domain.smb.SmbBrowseResult
 import skezza.nasbox.domain.smb.TestSmbConnectionUseCase
+import skezza.nasbox.ui.common.LoadState
 import skezza.nasbox.domain.vault.ServerInput
 import skezza.nasbox.domain.vault.ServerValidationResult
 import skezza.nasbox.domain.vault.ValidateServerInputUseCase
@@ -38,7 +42,7 @@ class VaultViewModel(
     private var pendingDiscoverySelection: DiscoveredSmbServer? = null
     private var pendingAutoBrowse: Boolean = false
 
-    val servers: StateFlow<List<ServerListItemUiState>> = serverRepository.observeServers()
+    private val serverItemsFlow = serverRepository.observeServers()
         .combine(testingServerIds) { servers, testing ->
             servers.map {
                 ServerListItemUiState(
@@ -54,7 +58,23 @@ class VaultViewModel(
                 )
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val serverListUiState: StateFlow<ServerListUiState> = serverItemsFlow
+        .map { ServerListUiState(loadState = LoadState.Success, servers = it) }
+        .onStart { emit(ServerListUiState(loadState = LoadState.Loading)) }
+        .catch {
+            emit(
+                ServerListUiState(
+                    loadState = LoadState.Error(VAULT_SERVER_ERROR_MESSAGE),
+                    errorMessage = VAULT_SERVER_ERROR_MESSAGE,
+                ),
+            )
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            ServerListUiState(loadState = LoadState.Loading),
+        )
 
     private val _editorState = MutableStateFlow(ServerEditorUiState())
     val editorState: StateFlow<ServerEditorUiState> = _editorState.asStateFlow()
@@ -353,13 +373,12 @@ class VaultViewModel(
             basePath = browseSmbDestinationUseCase.normalizePath(state.currentPath),
         )
         _browseState.value = SmbBrowseUiState()
-        _message.value = "Destination prefilled from SMB browse."
     }
 
     private suspend fun loadBrowseShares() {
         val editor = _editorState.value
         _browseState.value = _browseState.value.copy(isLoading = true, errorMessage = null)
-            when (val result = browseSmbDestinationUseCase.listShares(editor.host, editor.username, editor.password, editor.domain.trim())) {
+        when (val result = browseSmbDestinationUseCase.listShares(editor.host, editor.username, editor.password, editor.domain.trim())) {
             is SmbBrowseResult.Success -> {
                 _browseState.value = _browseState.value.copy(
                     isLoading = false,
@@ -575,3 +594,11 @@ data class SmbBrowseUiState(
     val breadcrumbs: List<String>
         get() = listOf("") + currentPath.split('/').filter { it.isNotBlank() }
 }
+
+data class ServerListUiState(
+    val loadState: LoadState = LoadState.Idle,
+    val servers: List<ServerListItemUiState> = emptyList(),
+    val errorMessage: String? = null,
+)
+
+private const val VAULT_SERVER_ERROR_MESSAGE = "Unable to load servers. Check SMB credentials or network."

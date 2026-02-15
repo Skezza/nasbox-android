@@ -8,8 +8,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import skezza.nasbox.data.db.PlanEntity
@@ -37,6 +40,7 @@ import skezza.nasbox.domain.schedule.normalizeWeeklyDaysMask
 import skezza.nasbox.domain.schedule.weeklyMaskFor
 import skezza.nasbox.domain.sync.EnqueuePlanRunUseCase
 import skezza.nasbox.domain.sync.RunTriggerSource
+import skezza.nasbox.ui.common.LoadState
 
 class PlansViewModel(
     private val planRepository: PlanRepository,
@@ -65,7 +69,7 @@ class PlansViewModel(
     private val _activeRunPlanIds = MutableStateFlow<Set<Long>>(emptySet())
     val activeRunPlanIds: StateFlow<Set<Long>> = _activeRunPlanIds.asStateFlow()
 
-    val plans: StateFlow<List<PlanListItemUiState>> = combine(
+    private val planItemsFlow = combine(
         planRepository.observePlans(),
         serverRepository.observeServers(),
     ) { plans, servers ->
@@ -108,7 +112,24 @@ class PlansViewModel(
                 ),
             )
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    }
+
+    val planListUiState: StateFlow<PlanListUiState> = planItemsFlow
+        .map { PlanListUiState(loadState = LoadState.Success, plans = it) }
+        .onStart { emit(PlanListUiState(loadState = LoadState.Loading)) }
+        .catch {
+            emit(
+                PlanListUiState(
+                    loadState = LoadState.Error(PLAN_LIST_ERROR_MESSAGE),
+                    errorMessage = PLAN_LIST_ERROR_MESSAGE,
+                ),
+            )
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = PlanListUiState(loadState = LoadState.Loading),
+        )
 
     val servers: StateFlow<List<PlanServerOption>> = serverRepository.observeServers().combine(_editorState) { servers, editor ->
         servers.map {
@@ -382,6 +403,12 @@ data class PlanListItemUiState(
     val scheduleSummary: String,
 )
 
+data class PlanListUiState(
+    val loadState: LoadState = LoadState.Idle,
+    val plans: List<PlanListItemUiState> = emptyList(),
+    val errorMessage: String? = null,
+)
+
 data class PlanServerOption(
     val serverId: Long,
     val label: String,
@@ -463,3 +490,4 @@ internal fun planEntityFromEditorState(state: PlanEditorUiState): PlanEntity {
 }
 
 private const val FULL_DEVICE_PRESET = "FULL_DEVICE_SHARED_STORAGE"
+private const val PLAN_LIST_ERROR_MESSAGE = "Unable to load jobs. Check media permission or storage access."

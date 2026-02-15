@@ -27,9 +27,8 @@ class RunPlanWorker(
         if (planId <= 0L) return Result.failure()
 
         val triggerSource = inputData.getString(KEY_TRIGGER_SOURCE) ?: RunTriggerSource.MANUAL
-        setForeground(createForegroundInfo(planId))
-
         return runCatching {
+            setForeground(createForegroundInfo(planId))
             val result = appContainer.runPlanBackupUseCase(planId, triggerSource)
             if (triggerSource == RunTriggerSource.SCHEDULED && result.status in FAILURE_STATUSES) {
                 postOutcomeNotification(
@@ -43,6 +42,11 @@ class RunPlanWorker(
             }
             Result.success()
         }.getOrElse { error ->
+            // If the worker fails before run finalization (for example foreground restrictions),
+            // close any orphaned active rows so dashboard state stays accurate.
+            runCatching {
+                appContainer.reconcileStaleActiveRunsUseCase(forceFinalizeActive = true)
+            }
             if (triggerSource == RunTriggerSource.SCHEDULED) {
                 postOutcomeNotification(
                     title = "Scheduled backup failed to start",

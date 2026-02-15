@@ -37,6 +37,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -52,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -63,6 +65,9 @@ import skezza.nasbox.domain.schedule.PlanScheduleWeekday
 import skezza.nasbox.domain.schedule.formatMinutesOfDay
 import skezza.nasbox.domain.schedule.formatPlanScheduleSummary
 import skezza.nasbox.domain.schedule.isDaySelected
+import skezza.nasbox.ui.common.ErrorHint
+import skezza.nasbox.ui.common.LoadState
+import skezza.nasbox.ui.common.StateCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,7 +79,7 @@ fun PlansScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val plans by viewModel.plans.collectAsState()
+    val planListState by viewModel.planListUiState.collectAsState()
     val message by viewModel.message.collectAsState()
     val activeRunPlanIds by viewModel.activeRunPlanIds.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -117,78 +122,109 @@ fun PlansScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         modifier = modifier,
     ) { innerPadding ->
-        if (plans.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("No jobs yet. Add your first backup job.")
-                ElevatedButton(onClick = onAddPlan, modifier = Modifier.padding(top = 12.dp)) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Text("Add job", modifier = Modifier.padding(start = 8.dp))
+        when {
+            planListState.loadState == LoadState.Loading -> {
+                StateCard(
+                    title = "Loading jobs",
+                    description = "Gathering your saved plans and servers.",
+                    progressContent = {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    },
+                )
+            }
+            planListState.loadState is LoadState.Error -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                ) {
+                    ErrorHint(
+                        message = planListState.errorMessage
+                            ?: "Unable to load plans. Check permissions and try again.",
+                    )
+                    StateCard(
+                        title = "Jobs could not be displayed",
+                        description = "Check your media permissions or network and reopen this screen.",
+                    )
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(plans, key = { it.planId }) { plan ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onEditPlan(plan.planId) },
-                    ) {
-                        Column(
+            planListState.plans.isEmpty() -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    StateCard(
+                        title = "No jobs yet",
+                        description = "Create a job to back up your favorite albums to a NAS server.",
+                        actionLabel = "Add job",
+                        onAction = onAddPlan,
+                    )
+                }
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(planListState.plans, key = { it.planId }) { plan ->
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                .clickable { onEditPlan(plan.planId) },
                         ) {
-                            Text(plan.name)
-                            Text("Source: ${plan.sourceSummary}")
-                            Text("Server: ${plan.serverName}")
-                            if (plan.useAlbumTemplating) {
-                                Text("Template: ${plan.template}")
-                                Text("Filename: ${plan.filenamePattern}")
-                            }
-                            Text("Schedule: ${plan.scheduleSummary}")
-                            Text(if (plan.enabled) "Enabled" else "Disabled")
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
-                                Button(
-                                    onClick = {
-                                        val requiredPermissions = requiredRunPermissions(
-                                            sourceType = plan.sourceType,
-                                            includeVideos = plan.includeVideos,
-                                        )
-                                        val deniedPermissions = requiredPermissions.filter { permission ->
-                                            ContextCompat.checkSelfPermission(
-                                                context,
-                                                permission,
-                                            ) != PackageManager.PERMISSION_GRANTED
-                                        }
-                                        if (deniedPermissions.isEmpty()) {
-                                            onRunPlan(plan.planId)
-                                        } else {
-                                            pendingRunPlanId = plan.planId
-                                            pendingRunPermissions = deniedPermissions
-                                            runPermissionLauncher.launch(deniedPermissions.toTypedArray())
-                                        }
-                                    },
-                                    enabled = plan.enabled && !activeRunPlanIds.contains(plan.planId),
-                                ) {
-                                    Text(if (activeRunPlanIds.contains(plan.planId)) "Running..." else "Run now")
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(plan.name)
+                                Text("Source: ${plan.sourceSummary}")
+                                Text("Server: ${plan.serverName}")
+                                if (plan.useAlbumTemplating) {
+                                    Text("Template: ${plan.template}")
+                                    Text("Filename: ${plan.filenamePattern}")
                                 }
-                                Button(onClick = { viewModel.deletePlan(plan.planId) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = null)
-                                    Text("Delete", modifier = Modifier.padding(start = 6.dp))
+                                Text("Schedule: ${plan.scheduleSummary}")
+                                Text(if (plan.enabled) "Enabled" else "Disabled")
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
+                                    Button(
+                                        onClick = {
+                                            val requiredPermissions = requiredRunPermissions(
+                                                sourceType = plan.sourceType,
+                                                includeVideos = plan.includeVideos,
+                                            )
+                                            val deniedPermissions = requiredPermissions.filter { permission ->
+                                                ContextCompat.checkSelfPermission(
+                                                    context,
+                                                    permission,
+                                                ) != PackageManager.PERMISSION_GRANTED
+                                            }
+                                            if (deniedPermissions.isEmpty()) {
+                                                onRunPlan(plan.planId)
+                                            } else {
+                                                pendingRunPlanId = plan.planId
+                                                pendingRunPermissions = deniedPermissions
+                                                runPermissionLauncher.launch(deniedPermissions.toTypedArray())
+                                            }
+                                        },
+                                        enabled = plan.enabled && !activeRunPlanIds.contains(plan.planId),
+                                    ) {
+                                        Text(if (activeRunPlanIds.contains(plan.planId)) "Running..." else "Run now")
+                                    }
+                                    Button(onClick = { viewModel.deletePlan(plan.planId) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = null)
+                                        Text("Delete", modifier = Modifier.padding(start = 6.dp))
+                                    }
                                 }
                             }
                         }
@@ -335,8 +371,7 @@ fun PlanEditorScreen(
                                 Icon(Icons.Default.Info, contentDescription = null)
                                 Text("Full phone backup")
                             }
-                            Text("This job will attempt to back up shared-storage folders (for example DCIM, Pictures, Movies, Download, Documents, Music).")
-                            Text("Heads up: this can take a long time and use plenty of battery. Best run overnight while charging.")
+                            Text("This job backs up all available shared-storage (DCIM, Documents, Downloads etc).")
                         }
                     }
                 }

@@ -342,6 +342,37 @@ class RunPlanBackupUseCaseTest {
     }
 
     @Test
+    fun invoke_avoidsLoggingRawRemotePaths() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "{year}/{month}",
+            filenamePattern = "{timestamp}_{mediaId}.{ext}",
+            enabled = true,
+        )
+
+        val logRepo = FakeRunLogRepository()
+        runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = FakeRunRepository(),
+            logRepo = logRepo,
+            mediaDataSource = FakeMediaStoreDataSource(albumItems = listOf(
+                MediaImageItem("1", "album-1", "one.jpg", "image/jpeg", 1_700_000_000_000, 4),
+            )),
+            smbClient = FakeSmbClient(),
+        )(plan.planId)
+
+        assertTrue(logRepo.logs.all { log ->
+            val detail = log.detail.orEmpty()
+            !detail.contains("remotePath=") && !detail.contains("password")
+        })
+    }
+
+    @Test
     fun render_appliesTemplateWhenAlbumTemplatingEnabled() {
         val rendered = PathRenderer.render(
             basePath = "photos",
@@ -359,9 +390,13 @@ class RunPlanBackupUseCaseTest {
             useAlbumTemplating = true,
         )
 
-        assertTrue(rendered.startsWith("photos/"))
-        assertTrue(rendered.contains("/Camera/"))
-        assertTrue(rendered.endsWith("_77.jpg"))
+        assertTrue("Expected photos prefix, got ${rendered.path}", rendered.path.startsWith("photos/"))
+        assertTrue("Expected Camera segment, got ${rendered.path}", rendered.path.contains("/Camera/"))
+        assertTrue("Filename mismatch: ${rendered.path}", rendered.path.endsWith("_77.jpg"))
+        assertTrue(
+            "Unexpected fallback tokens: ${rendered.usedDefaultTokens}",
+            rendered.usedDefaultTokens.isEmpty() || rendered.usedDefaultTokens == setOf("device"),
+        )
     }
 
     @Test
@@ -379,7 +414,30 @@ class RunPlanBackupUseCaseTest {
             ),
         )
 
-        assertEquals("archive/DCIM/cam_era_/clip_.mp4", rendered)
+        assertEquals("archive/DCIM/cam_era_/clip_.mp4", rendered.path)
+    }
+
+    @Test
+    fun render_recordsFallbackTokensWhenTemplateMissingValues() {
+        val rendered = PathRenderer.render(
+            basePath = "photos",
+            directoryTemplate = "{year}/{missing}/{album}",
+            filenamePattern = "{timestamp}_{mediaId}.{ext}",
+            mediaItem = MediaImageItem(
+                mediaId = "123",
+                bucketId = "bucket",
+                displayName = "image.jpg",
+                mimeType = "image/jpeg",
+                dateTakenEpochMs = null,
+                sizeBytes = 1024,
+            ),
+            fallbackAlbumToken = "",
+            useAlbumTemplating = true,
+        )
+
+        assertTrue("missing" in rendered.usedDefaultTokens)
+        assertTrue("album" in rendered.usedDefaultTokens)
+        assertTrue("year" in rendered.usedDefaultTokens)
     }
 
     @Test

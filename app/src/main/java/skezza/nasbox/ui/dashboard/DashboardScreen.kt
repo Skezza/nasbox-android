@@ -32,6 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import skezza.nasbox.domain.sync.RunStatus
+import skezza.nasbox.ui.common.ErrorHint
+import skezza.nasbox.ui.common.LoadState
+import skezza.nasbox.ui.common.StateCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,6 +86,23 @@ fun DashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (state.loadState == LoadState.Loading) {
+                item {
+                    StateCard(
+                        title = "Loading dashboard",
+                        description = "Checking vault health and recent runs.",
+                        progressContent = {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        },
+                    )
+                }
+            }
+            val errorMessage = state.errorMessage
+            if (state.loadState is LoadState.Error && errorMessage != null) {
+                item {
+                    ErrorHint(message = errorMessage)
+                }
+            }
             item {
                 VaultHealthCard(state = state)
             }

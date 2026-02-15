@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
         val appContainer = AppContainer(applicationContext)
         lifecycleScope.launch {
             appContainer.reconcileSchedulesOnStartup()
-            appContainer.reconcileStaleActiveRunsUseCase()
+            appContainer.reconcileRunsOnStartup()
         }
         enableEdgeToEdge()
         setContent {

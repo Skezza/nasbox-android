@@ -7,7 +7,9 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -23,6 +25,7 @@ import skezza.nasbox.domain.schedule.formatPlanScheduleSummary
 import skezza.nasbox.domain.sync.ReconcileStaleActiveRunsUseCase
 import skezza.nasbox.domain.sync.RunStatus
 import skezza.nasbox.domain.sync.StopRunUseCase
+import skezza.nasbox.ui.common.LoadState
 
 class DashboardViewModel(
     private val planRepository: PlanRepository,
@@ -51,6 +54,17 @@ class DashboardViewModel(
             recentRuns = recentRuns.map { it.toRecent(planNamesById) },
             nextScheduledRun = computeNextScheduledRun(plans, now),
             stoppingRunIds = stoppingRunIds,
+            loadState = LoadState.Success,
+            errorMessage = null,
+        )
+    }.onStart {
+        emit(DashboardUiState(loadState = LoadState.Loading))
+    }.catch {
+        emit(
+            DashboardUiState(
+                loadState = LoadState.Error(DASHBOARD_ERROR_MESSAGE),
+                errorMessage = DASHBOARD_ERROR_MESSAGE,
+            ),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -201,6 +215,7 @@ class DashboardViewModel(
             RunStatus.INTERRUPTED,
             RunStatus.CANCELED,
         )
+        private const val DASHBOARD_ERROR_MESSAGE = "Unable to load dashboard data. Check your network or SMB configuration."
 
         fun factory(
             planRepository: PlanRepository,
@@ -245,6 +260,8 @@ data class DashboardUiState(
     val recentRuns: List<DashboardRecentRun> = emptyList(),
     val nextScheduledRun: DashboardNextScheduledRun? = null,
     val stoppingRunIds: Set<Long> = emptySet(),
+    val loadState: LoadState = LoadState.Success,
+    val errorMessage: String? = null,
 )
 
 data class DashboardVaultHealth(

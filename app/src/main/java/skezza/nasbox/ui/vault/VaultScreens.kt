@@ -31,6 +31,7 @@ import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -55,6 +56,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+import skezza.nasbox.ui.common.ErrorHint
+import skezza.nasbox.ui.common.LoadState
+import skezza.nasbox.ui.common.StateCard
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VaultScreen(
@@ -63,7 +68,7 @@ fun VaultScreen(
     onEditServer: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val servers by viewModel.servers.collectAsState()
+    val serverListState by viewModel.serverListUiState.collectAsState()
     val message by viewModel.message.collectAsState()
     val discoveryState by viewModel.discoveryState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -120,65 +125,96 @@ fun VaultScreen(
             )
         }
 
-        if (servers.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("No servers yet. Add one to start building your server list.")
-                ElevatedButton(onClick = onAddServer, modifier = Modifier.padding(top = 12.dp)) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Text("Add server", modifier = Modifier.padding(start = 8.dp))
+        when {
+            serverListState.loadState == LoadState.Loading -> {
+                StateCard(
+                    title = "Loading servers",
+                    description = "Checking configured destinations and discovery status.",
+                    progressContent = {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    },
+                )
+            }
+            serverListState.loadState is LoadState.Error -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                ) {
+                    ErrorHint(
+                        message = serverListState.errorMessage
+                            ?: "Unable to load servers. Check SMB credentials or network.",
+                    )
+                    StateCard(
+                        title = "Servers unavailable",
+                        description = "Verify SMB credentials or Wi-Fi connectivity, then reopen this screen.",
+                    )
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(servers, key = { it.serverId }) { server ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onEditServer(server.serverId) },
-                    ) {
-                        Column(
+            serverListState.servers.isEmpty() -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    StateCard(
+                        title = "No servers yet",
+                        description = "Add your first NAS destination to start backing up photos.",
+                        actionLabel = "Add server",
+                        onAction = onAddServer,
+                    )
+                }
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(serverListState.servers, key = { it.serverId }) { server ->
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                .clickable { onEditServer(server.serverId) },
                         ) {
-                            Text(server.name)
-                            Text(server.endpoint)
-                            Text("Base: ${server.basePath}")
-                            Text(server.connectionStatusLabel())
-                            if (server.lastTestStatus == "FAILED" && !server.lastTestErrorMessage.isNullOrBlank()) {
-                                Text("Last error: ${server.lastTestErrorMessage}")
-                            }
-                            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                Row {
-                                    IconButton(onClick = { onEditServer(server.serverId) }) {
-                                        Icon(Icons.Default.Edit, contentDescription = "Edit server")
-                                    }
-                                    IconButton(onClick = { viewModel.deleteServer(server.serverId) }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete server")
-                                    }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(server.name)
+                                Text(server.endpoint)
+                                Text("Base: ${server.basePath}")
+                                Text(server.connectionStatusLabel())
+                                if (server.lastTestStatus == "FAILED" && !server.lastTestErrorMessage.isNullOrBlank()) {
+                                    Text("Last error: ${server.lastTestErrorMessage}")
                                 }
-                                ElevatedButton(
-                                    onClick = { viewModel.testServerConnection(server.serverId) },
-                                    enabled = !server.isTesting,
-                                ) {
-                                    Icon(Icons.Default.NetworkCheck, contentDescription = null)
-                                    Text(
-                                        if (server.isTesting) "Testing..." else "Test",
-                                        modifier = Modifier.padding(start = 8.dp),
-                                    )
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Row {
+                                        IconButton(onClick = { onEditServer(server.serverId) }) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit server")
+                                        }
+                                        IconButton(onClick = { viewModel.deleteServer(server.serverId) }) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete server")
+                                        }
+                                    }
+                                    ElevatedButton(
+                                        onClick = { viewModel.testServerConnection(server.serverId) },
+                                        enabled = !server.isTesting,
+                                    ) {
+                                        Icon(Icons.Default.NetworkCheck, contentDescription = null)
+                                        Text(
+                                            if (server.isTesting) "Testing..." else "Test",
+                                            modifier = Modifier.padding(start = 8.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -245,28 +281,38 @@ fun ServerEditorScreen(
                 .padding(innerPadding)
                 .padding(16.dp)
                 .verticalScroll(scrollState),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            ServerField("Name", state.name, state.validation.nameError) {
+            ServerField(
+                fieldName = "Name",
+                value = state.name,
+                error = state.validation.nameError,
+                helperText = "Name: pick something memorable (e.g., Home NAS).",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.NAME, it)
             }
             ServerField(
-                label = "Host",
+                fieldName = "Host",
                 value = state.host,
                 error = state.validation.hostError,
-                helperText = "Examples: quanta.local or smb://quanta.local/photos",
+                helperText = "Host: smb://example.local/photos.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
             ServerField(
-                label = "Share",
+                fieldName = "Share",
                 value = state.shareName,
                 error = state.validation.shareNameError,
-                helperText = "Optional for root-level validation; can be in host as smb://host/share",
+                helperText = "Share: optional; you can append it to the host (smb://host/share).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
-            ServerField("Base path", state.basePath, state.validation.basePathError) {
+            ServerField(
+                fieldName = "Base path",
+                value = state.basePath,
+                error = state.validation.basePathError,
+                helperText = "Base path: optional subfolder under the share.",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
             ElevatedButton(
@@ -276,23 +322,28 @@ fun ServerEditorScreen(
                 Icon(Icons.Default.TravelExplore, contentDescription = null)
                 Text("Browse share & folder", modifier = Modifier.padding(start = 8.dp))
             }
-            Text("Tip: browse helps prefill Share and Base path from the server.")
             ServerField(
-                label = "Domain / workgroup",
+                fieldName = "Domain / workgroup",
                 value = state.domain,
                 error = null,
-                helperText = "Optional SMB domain (e.g., WORKGROUP)",
+                helperText = "Domain: optional SMB domain (e.g., WORKGROUP).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.DOMAIN, it)
             }
-            ServerField("Username", state.username, state.validation.usernameError) {
+            ServerField(
+                fieldName = "Username",
+                value = state.username,
+                error = state.validation.usernameError,
+                helperText = "Username: required only for authenticated access.",
+            ) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
             ServerField(
-                label = "Password",
+                fieldName = "Password",
                 value = state.password,
                 error = state.validation.passwordError,
                 isPassword = true,
+                helperText = "Password: leave blank for guest access.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
@@ -314,7 +365,7 @@ fun ServerEditorScreen(
 
 @Composable
 private fun ServerField(
-    label: String,
+    fieldName: String,
     value: String,
     error: String?,
     helperText: String? = null,
@@ -324,7 +375,7 @@ private fun ServerField(
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        placeholder = { Text(fieldName) },
         isError = error != null,
         singleLine = true,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
