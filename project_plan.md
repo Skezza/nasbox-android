@@ -1,4 +1,4 @@
-# VaultPilot MVP Project Plan (Phase 0 to Phase 8)
+# NASBox MVP Project Plan (Phase 0 to Phase 8)
 
 This plan sequences delivery into reviewable phases while keeping the app functional after every phase.
 
@@ -6,7 +6,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ## Current execution status
 - ✅ Phase 0 — Navigation and UI scaffolding: **Completed**.
 - ✅ Phase 1 — Persistence foundation: **Completed**.
-- ✅ Phase 2 — Credential security and Vault management: **Completed**.
+- ✅ Phase 2 — Credential security and server management: **Completed**.
 - ✅ Phase 3 — SMB connectivity and test flow: **Completed**.
 - ✅ Phase 4 — Media source integration and Plan management: **Completed**.
 - 🧭 Phase 4.5 — Guided SMB destination browse assist: **Proposed**.
@@ -14,7 +14,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 5.5 — Source expansion execution (folder + full-device): **Completed**.
 - ✅ Phase 5.5.1 — Share discovery fallback: **Completed**.
 - ✅ Phase 6 — Dashboard mission control: **Completed**.
-- 🧭 Phase 6.5 — Dashboard improvements (run control + live current runs): **Proposed**.
+- ✅ Phase 6.5 — Dashboard improvements (run control + live current runs): **Completed**.
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
 - Validate phase exit criteria before advancing.
@@ -28,7 +28,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - Establish information architecture with stable routes and screen shells.
 
 ### Work
-- Implement bottom-nav structure with Dashboard, Plans, and Vault.
+- Implement bottom-nav structure with Dashboard, Plans, and Servers.
 - Add route wiring for plan editor, server editor, and optional run detail.
 - Create placeholder screen surfaces with basic actions and navigation transitions.
 
@@ -37,7 +37,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - Placeholder actions are connected and predictable.
 
 ### Implementation status
-- ✅ Completed: bottom navigation routes for Dashboard, Plans, and Vault are wired.
+- ✅ Completed: bottom navigation routes for Dashboard, Plans, and Servers are wired.
 - ✅ Completed: plan editor, server editor, and optional run detail placeholder routes are implemented.
 - ✅ Completed: placeholder actions navigate to the expected destinations and return paths are functional.
 
@@ -67,13 +67,13 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ---
 
-## Phase 2 — Credential security and Vault management
+## Phase 2 — Credential security and server management
 
 ### Goals
 - Deliver secure server management UX and secure credential storage.
 
 ### Work
-- Implement Vault list screen with add/edit/delete actions.
+- Implement server list screen with add/edit/delete actions.
 - Build server editor validation for host, share, base path, username, and password.
 - Implement Keystore-backed secret store abstraction.
 - Store only credential alias/reference in Room.
@@ -81,10 +81,10 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Exit criteria
 - Server create/edit/delete works end-to-end.
 - Password is not stored in plaintext DB.
-- Vault screen reflects updated server states.
+- Server screen reflects updated server states.
 
 ### Implementation status
-- ✅ Completed: Vault list screen now renders persisted server entries and supports add/edit/delete flows.
+- ✅ Completed: Server list screen now renders persisted server entries and supports add/edit/delete flows.
 - ✅ Completed: Server editor validates required fields for host/share/base path/username/password before persistence.
 - ✅ Completed: credential material is stored in a keystore-backed credential store and Room persists only credential aliases.
 
@@ -98,7 +98,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Work
 - Integrate SMB2/3 client library via wrapper abstraction.
 - Implement connection test use case (host/share/auth and latency capture).
-- Wire per-server test actions in Vault and server editor.
+- Wire per-server test actions in the server list and server editor.
 - Map SMB failures to user-friendly error categories.
 
 ### Exit criteria
@@ -108,9 +108,9 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Implementation status
 - ✅ Completed: SMBJ is integrated behind a `SmbClient` wrapper abstraction to keep protocol calls out of UI/domain layers.
 - ✅ Completed: a dedicated connection test use case validates host/share/auth and records latency for successful checks.
-- ✅ Completed: Vault list and server editor now expose connection test actions with inline progress and snackbar feedback.
+- ✅ Completed: Server list and server editor now expose connection test actions with inline progress and snackbar feedback.
 - ✅ Completed: mapped failure categories are persisted as server test metadata for downstream vault/dashboard health surfaces.
-- ✅ Scope extension (unplanned, user-requested): Vault now includes local-network SMB discovery (subnet probing + mDNS host enrichment + `.local` fallback host checks) to prefill server editor values from reachable SMB endpoints on Wi-Fi.
+- ✅ Scope extension (unplanned, user-requested): The server list now includes local-network SMB discovery (subnet probing + mDNS host enrichment + `.local` fallback host checks) to prefill server editor values from reachable SMB endpoints on Wi-Fi.
 - ⚠️ Deferred by request: share/root folder browsing from discovered hosts remains out of scope for current Phase 3 UX and will be revisited in a later phase.
 
 ---
@@ -220,7 +220,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ### Goals
 - Deliver a browse assistant that uses SMB2/3-compatible SRVSVC `NetShareEnum` over SMBJ RPC before any secondary fallback path.
-- Keep the Vault “Browse destination” flow fast and predictable while expanding the set of hosts that can prefill share + base path inputs automatically.
+- Keep the server browse-destination flow fast and predictable while expanding the set of hosts that can prefill share + base path inputs automatically.
 
 ### Work
 - Add a `SmbShareRpcEnumerator` data-layer contract implemented with SMBJ RPC (`IPC$` + SRVSVC `NetShareEnum`) and domain-aware authentication.
@@ -278,7 +278,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - Make run operations and system health observable in one place.
 
 ### Work
-- Build dashboard status card with vault health and last run summary.
+- Build dashboard status card with backup health and last run summary.
 - Add “Run now” and “Test connection” primary actions.
 - Show live progress strip during active run.
 - Render timeline of recent events from run logs.
@@ -290,11 +290,11 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ### Implementation status
 - ✅ Completed: Dashboard route now renders a dedicated mission-control screen backed by `DashboardViewModel` instead of a placeholder.
-- ✅ Completed: dashboard status card now summarizes vault health (fresh-success vs failed vs stale/untested tests) and latest run counters/status with summary error context.
+- ✅ Completed: dashboard status card now summarizes backup health (fresh-success vs failed vs stale/untested tests) and latest run counters/status with summary error context.
 - ✅ Completed: dashboard primary actions now support **Run now** for selected plans and **Test connection** for selected servers with in-flight action guards and snackbar feedback.
 - ✅ Completed: live run strip now appears when latest run status is `RUNNING`, using persisted run counters from incremental run updates.
 - ✅ Completed: recent timeline section now reads persisted run-log entries (cross-run, most-recent first) and maps them to plan names.
-- ✅ Completed: prerequisite CTAs now guide users to Vault/Plans when servers or plans are missing.
+- ✅ Completed: prerequisite CTAs now guide users to Servers/Plans when servers or plans are missing.
 - ✅ Completed: `RunPlanBackupUseCase` now persists running snapshots and emits explicit progress events so dashboard observability updates during active runs.
 - ✅ Completed: focused unit tests cover dashboard view-model behavior and run progress snapshot/event emission.
 
@@ -316,10 +316,10 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Work
 - Implement cooperative stop/cancel behavior in run orchestration:
   - add stop request pathway (single-run and optional stop-all entrypoint),
-  - persist transitional state (`CANCEL_REQUESTED`/`STOPPING`) and terminal `CANCELED`,
+  - persist terminal `CANCELED` state from dashboard stop action,
   - finalize canceled runs with consistent counters, summary, and log detail.
 - Split dashboard data contracts into explicit streams:
-  - `Current runs`: active statuses only (for example `RUNNING` and `CANCEL_REQUESTED`) with live counters/progress.
+  - `Current runs`: active statuses only (`RUNNING`) with live counters/progress.
   - `Recent runs`: terminal statuses only (`SUCCESS`, `PARTIAL`, `FAILED`, `CANCELED`) for historical audit.
 - Upgrade dashboard UI:
   - render `Current runs` only when at least one run is active,
@@ -340,7 +340,13 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - `Recent runs` shows historical terminal runs only.
 
 ### Implementation status
-- 🧭 Proposed: approved direction for the next dashboard-focused implementation pass.
+- ✅ Completed: added a dedicated `StopRunUseCase` that terminalizes active runs as `CANCELED` with persisted run-log audit detail.
+- ✅ Completed: run orchestration now avoids reviving externally canceled rows and exits deterministically with canceled summary/log output.
+- ✅ Completed: dashboard data streams now split active `Current runs` (`RUNNING`) from terminal `Recent runs` (`SUCCESS`, `PARTIAL`, `FAILED`, `INTERRUPTED`, `CANCELED`).
+- ✅ Completed: dashboard UI now renders a conditional `Current runs` section with per-run progress, live counters, stop confirmation UX, and stop in-flight guards.
+- ✅ Completed: tapping an active run opens a dedicated live detail screen with status/counters, current-file indicator, and rolling per-file run-log feed.
+- ✅ Completed: stale active rows are reconciled on startup so stranded `CANCEL_REQUESTED` runs terminalize to `CANCELED` (and stale `RUNNING` runs to `INTERRUPTED`) for audit consistency.
+- ✅ Completed: unit coverage now includes stop command behavior, cooperative cancellation finalization, dashboard stream-splitting/state mapping, and live detail mapping.
 
 ---
 
@@ -396,4 +402,4 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 5.5 source-expansion execution is now landed before dashboard mission-control work.
 - Keep dashboard wiring thin until run and log repositories are stable.
 - Treat run logs as first-class data early to reduce debugging friction in later phases.
-- Phase 6.5 (active-run control + current-vs-recent split) should land before additional dashboard health-card enhancements.
+- ✅ Phase 6.5 (active-run control + current-vs-recent split) is now landed ahead of any additional health-card redesign work.

@@ -1,7 +1,7 @@
-# VaultPilot Technical Considerations (MVP)
+# NASBox Technical Considerations (MVP)
 
 ## Purpose
-This document defines the architectural and technical decisions for delivering VaultPilot MVP as a manual-run, archive-only SMB2/3 photo backup app on Android.
+This document defines the architectural and technical decisions for delivering NASBox MVP as a manual-run, archive-only SMB2/3 photo backup app on Android.
 
 ## MVP scope boundaries
 
@@ -29,7 +29,7 @@ Adopt a layered architecture to keep implementation incremental and testable.
 - Bottom navigation sections:
   - Dashboard
   - Plans
-  - Vault
+  - Servers
 - Additional routes for plan editing, server editing, and run detail.
 - ViewModels own UI state via immutable state models and StateFlow.
 - Composables are rendering-focused and event-driven.
@@ -65,7 +65,7 @@ Adopt a layered architecture to keep implementation incremental and testable.
 
 ## Repository structure guidance
 Organize by feature/layer with clear boundaries:
-- UI modules/packages for dashboard, plans, vault, and navigation.
+- UI modules/packages for dashboard, plans, server management, and navigation.
 - Domain modules/packages for use cases and domain models.
 - Data modules/packages for db, repositories, SMB, media, and security adapters.
 - Core modules/packages for logging, error mapping, utilities.
@@ -185,7 +185,7 @@ Each mapped error should provide:
 
 ## UX-state rules tied to data
 - Dashboard should derive status from selected plan, server test recency, and latest run.
-- Vault health indicator should use last test outcome and age thresholds.
+- Backup health indicator should use last test outcome and age thresholds.
 - Dashboard should split live `Current runs` (active statuses) from historical `Recent runs` (terminal statuses only).
 - `Current runs` should auto-hide when no run is active and expose stop control + live counters/progress.
 - `Recent runs` should be audit-focused and need not stream active-run updates in real time.
@@ -216,11 +216,11 @@ Each mapped error should provide:
 - Baseline persistence tests are expected to remain in place as Phase 2+ introduces secure credential and sync logic.
 
 ## Phase 2 implementation notes
-- Vault management now uses persisted `ServerEntity` rows with create, update, and delete UI actions in Compose.
+- Server management now uses persisted `ServerEntity` rows with create, update, and delete UI actions in Compose.
 - Server editor enforces required-field validation for server name, host, share, base path, username, and password.
 - Secret values are encrypted via Android Keystore-backed AES/GCM keys and stored outside Room.
 - Room persists only `credentialAlias` references, preserving the plaintext password prohibition.
-- VaultViewModel factory now supports both classic and `CreationExtras` creation paths, and Vault flows are guarded with user-visible error handling to avoid coroutine crash propagation during editor operations.
+- VaultViewModel factory now supports both classic and `CreationExtras` creation paths, and server flows are guarded with user-visible error handling to avoid coroutine crash propagation during editor operations.
 
 ---
 
@@ -233,13 +233,13 @@ Each mapped error should provide:
 
 ## Phase 3 implementation notes
 - SMB connectivity now runs through a dedicated `SmbClient` abstraction with an SMBJ-backed implementation for SMB2/3 handshake/auth/share access checks.
-- Connection tests are orchestrated by a domain use case that supports both persisted Vault servers and in-editor draft credentials.
+- Connection tests are orchestrated by a domain use case that supports both persisted servers and in-editor draft credentials.
 - Host normalization accepts either plain host input or URI-style values such as `smb://host/share`, including share extraction when provided in host field.
-- Vault includes optional SMB discovery on the local network (port 445 probing on local subnet with mDNS service lookups (`_smb`, `_workstation`, `_device-info`) plus NetBIOS node-status lookups for host-name enrichment (with Android multicast lock during mDNS scanning) and merged common `.local` fallback probes that can replace IP-only discovery labels) to assist server setup; discovered hosts are advisory and still require credential validation.
+- The server list includes optional SMB discovery on the local network (port 445 probing on local subnet with mDNS service lookups (`_smb`, `_workstation`, `_device-info`) plus NetBIOS node-status lookups for host-name enrichment (with Android multicast lock during mDNS scanning) and merged common `.local` fallback probes that can replace IP-only discovery labels) to assist server setup; discovered hosts are advisory and still require credential validation.
 - Share/root folder browsing over SMB is intentionally deferred beyond current MVP Phase 3 UX scope despite discovery enhancements.
 - Phase 5.5.1 introduces SMBJ RPC share enumeration (`IPC$` + SRVSVC `NetShareEnum`) as the primary browse path, with SMBJ `listShares` as a secondary fallback when RPC returns empty.
 - SMB failures are normalized into MVP error taxonomy categories and surfaced as concise user-facing messages with recovery hints.
-- Server persistence now records test telemetry (`status`, `timestamp`, `latency`, and mapped error category/message) for vault health and upcoming dashboard status aggregation.
+- Server persistence now records test telemetry (`status`, `timestamp`, `latency`, and mapped error category/message) for backup health and upcoming dashboard status aggregation.
 - Room schema was incremented to version 2 with an explicit migration adding test metadata columns to `servers` to preserve upgrade compatibility.
 
 
@@ -308,7 +308,7 @@ Each mapped error should provide:
 ### Suggested implementation sequence
 1. Add SMB browse methods to `SmbClient` + `SmbjClient`.
 2. Add domain browse use case with mapped errors and normalized outputs.
-3. Add `VaultViewModel` browse state (`isBrowsing`, current share/path, nodes, errors).
+3. Add browse state to `VaultViewModel` (`isBrowsing`, current share/path, nodes, errors).
 4. Add Server Editor browse sheet/dialog and prefill action.
 5. Add unit tests for path normalization, breadcrumb navigation, and error mapping.
 
@@ -331,26 +331,33 @@ Each mapped error should provide:
 
 ## Phase 6 implementation notes
 - Dashboard mission control is now implemented with a dedicated `DashboardViewModel` and Compose screen wired to the top-level dashboard route.
-- Dashboard status card derives vault health from persisted server test telemetry and test-age thresholds, and summarizes latest run status/counters/error context.
+- Dashboard status card derives backup health from persisted server test telemetry and test-age thresholds, and summarizes latest run status/counters/error context.
 - Dashboard primary actions now support selecting a plan for **Run now** and selecting a server for **Test connection**, with guardrails for disabled plans and in-flight actions.
 - Run observability now uses flow-backed repository queries:
   - latest run stream (`runs ORDER BY started_at DESC LIMIT 1`)
   - latest timeline stream (run-log rows joined to runs, newest first)
 - `RunPlanBackupUseCase` now persists incremental `RUNNING` snapshots (scanned/uploaded/skipped/failed/summary) and emits explicit progress log events so UI progress and timeline update during active runs.
 - Dashboard now surfaces missing-prerequisite CTAs when no server or no plan exists, and displays a live progress strip while latest run status is `RUNNING`.
-- Known gap carried into Phase 6.5: active runs are observable but not directly controllable from dashboard, and historical timeline concerns are not fully separated from live-run UX.
 
-## Phase 6.5 proposed implementation notes
-- Add a dedicated `StopRunUseCase` (or equivalent command path) that requests cooperative cancellation and persists transitional `CANCEL_REQUESTED`/`STOPPING` intent before terminalizing as `CANCELED`.
-- Extend run-status handling so cancellation is first-class in domain logic, repository queries, and UI mapping.
-- Split dashboard data contracts:
-  - active-run query for `Current runs` (`RUNNING` + cancellation-in-progress statuses), observed as live stream.
-  - historical query for `Recent runs` (`SUCCESS`, `PARTIAL`, `FAILED`, `CANCELED`), rendered as audit list.
-- Expand dashboard UI into two explicit sections:
-  - `Current runs`: visible only when non-empty, includes progress bar, live counters, and stop action(s).
-  - `Recent runs`: always historical-only, no expectation of file-level live updates.
-- Add live run detail route/state with:
-  - active counter header and progress indicator,
-  - currently processing file snapshot,
-  - rolling file-event feed sourced from run logs.
-- Keep health-card redesign out of scope for 6.5 except layout adjustments required to accommodate the new current-runs section.
+## Phase 6.5 implementation notes
+- `StopRunUseCase` is now implemented as the dashboard stop-command entrypoint and terminalizes active rows immediately to `CANCELED` with persisted run-log audit messages.
+- `RunPlanBackupUseCase` now handles external cancellation safely:
+  - avoids reviving terminal `CANCELED` rows during progress snapshots,
+  - checks for stop intent between item operations,
+  - returns deterministic canceled results with persisted counters/summary (`Run canceled by user.` fallback).
+- Run-status handling now treats cancellation as first-class across domain and UI mapping (`RUNNING`, `CANCEL_REQUESTED`, `CANCELED`), with legacy `CANCEL_REQUESTED` rows retained only for stale-recovery compatibility.
+- Dashboard data contracts are split into explicit streams:
+  - `Current runs`: `RUNNING` only.
+  - `Recent runs`: terminal statuses only (`SUCCESS`, `PARTIAL`, `FAILED`, `INTERRUPTED`, `CANCELED`).
+- Dashboard UI now includes:
+  - conditional `Current runs` section with per-run progress bars, live counters, and stop controls,
+  - stop confirmation dialog + in-flight guard state,
+  - dedicated live detail drill-in for active runs.
+- App startup/dashboard initialization now runs a stale-active reconciliation pass:
+  - legacy stale `CANCEL_REQUESTED` runs are finalized to `CANCELED` on a shorter timeout window,
+  - stale `RUNNING` runs are marked `INTERRUPTED` on a more conservative timeout window.
+- Live run detail route/state now shows:
+  - active/terminal status summary with aggregate counters,
+  - current-file indicator derived from rolling processing log events,
+  - newest-first run-log feed for live troubleshooting.
+- Health-card redesign remains out of scope; only layout compatibility changes were made for `Current runs`.

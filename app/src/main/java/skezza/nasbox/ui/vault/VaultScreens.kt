@@ -81,7 +81,7 @@ fun VaultScreen(
         topBar = {
             TopAppBar(
                 expandedHeight = 56.dp,
-                title = { Text("Vault") },
+                title = { Text("Servers") },
                 actions = {
                     IconButton(
                         modifier = Modifier.size(52.dp),
@@ -128,7 +128,7 @@ fun VaultScreen(
                     .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text("No servers yet. Add one to start building your vault.")
+                Text("No servers yet. Add one to start building your server list.")
                 ElevatedButton(onClick = onAddServer, modifier = Modifier.padding(top = 12.dp)) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Text("Add server", modifier = Modifier.padding(start = 8.dp))

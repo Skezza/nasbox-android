@@ -57,7 +57,7 @@ class RunPlanWorker(
     private fun createForegroundInfo(planId: Long): ForegroundInfo {
         ensureChannel(RUNNING_CHANNEL_ID, "Scheduled Backups")
         val notification = NotificationCompat.Builder(applicationContext, RUNNING_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Backup running")
             .setContentText("Plan #$planId is backing up files.")
             .setOngoing(true)
@@ -83,7 +83,7 @@ class RunPlanWorker(
     ) {
         ensureChannel(OUTCOME_CHANNEL_ID, "Backup Alerts")
         val notification = NotificationCompat.Builder(applicationContext, OUTCOME_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))

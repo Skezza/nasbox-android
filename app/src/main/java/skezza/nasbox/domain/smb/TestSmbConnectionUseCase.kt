@@ -19,7 +19,7 @@ class TestSmbConnectionUseCase(
             ?: return SmbConnectionUiResult.failure(
                 category = SmbErrorCategory.UNKNOWN,
                 message = "Server not found.",
-                recoveryHint = "Reopen the Vault list and try again.",
+                recoveryHint = "Reopen the server list and try again.",
             )
 
         val password = credentialStore.loadPassword(server.credentialAlias)

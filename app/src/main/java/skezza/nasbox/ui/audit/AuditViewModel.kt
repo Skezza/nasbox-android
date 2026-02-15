@@ -46,7 +46,9 @@ class AuditViewModel(
                 AuditFilter.PARTIAL -> item.status == RunStatus.PARTIAL
                 AuditFilter.FAILED -> item.status == RunStatus.FAILED
                 AuditFilter.INTERRUPTED -> item.status == RunStatus.INTERRUPTED
-                AuditFilter.RUNNING -> item.status == RunStatus.RUNNING
+                AuditFilter.CANCELED -> item.status == RunStatus.CANCELED
+                AuditFilter.RUNNING ->
+                    item.status == RunStatus.RUNNING || item.status == RunStatus.CANCEL_REQUESTED
             }
         }
         AuditListUiState(
@@ -154,6 +156,7 @@ enum class AuditFilter {
     PARTIAL,
     FAILED,
     INTERRUPTED,
+    CANCELED,
     RUNNING,
 }
 

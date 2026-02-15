@@ -1,4 +1,4 @@
-# Codex Rules of Engagement for VaultPilot MVP
+# Codex Rules of Engagement for NASBox MVP
 
 This document defines required behavior for future Codex implementation passes.
 

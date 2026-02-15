@@ -31,7 +31,9 @@ import skezza.nasbox.domain.smb.BrowseSmbDestinationUseCase
 import skezza.nasbox.domain.smb.TestSmbConnectionUseCase
 import skezza.nasbox.domain.sync.EnqueuePlanRunUseCase
 import skezza.nasbox.domain.sync.MarkRunInterruptedUseCase
+import skezza.nasbox.domain.sync.ReconcileStaleActiveRunsUseCase
 import skezza.nasbox.domain.sync.RunPlanBackupUseCase
+import skezza.nasbox.domain.sync.StopRunUseCase
 
 class AppContainer(context: Context) {
     private val database = DatabaseProvider.get(context)
@@ -81,6 +83,16 @@ class AppContainer(context: Context) {
     val enqueuePlanRunUseCase: EnqueuePlanRunUseCase = EnqueuePlanRunUseCase(workManager)
 
     val markRunInterruptedUseCase: MarkRunInterruptedUseCase = MarkRunInterruptedUseCase(
+        runRepository = runRepository,
+        runLogRepository = runLogRepository,
+    )
+
+    val stopRunUseCase: StopRunUseCase = StopRunUseCase(
+        runRepository = runRepository,
+        runLogRepository = runLogRepository,
+    )
+
+    val reconcileStaleActiveRunsUseCase: ReconcileStaleActiveRunsUseCase = ReconcileStaleActiveRunsUseCase(
         runRepository = runRepository,
         runLogRepository = runLogRepository,
     )

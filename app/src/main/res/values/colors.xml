@@ -2,9 +2,4 @@
 <resources>
     <color name="nasbox_ink">#FF040B16</color>
     <color name="nasbox_charcoal">#FF0F172A</color>
-    <color name="nasbox_blue">#FF1C6BC3</color>
-    <color name="nasbox_teal">#FF1DB3A3</color>
-    <color name="nasbox_amber">#FFF9C74F</color>
-    <color name="nasbox_mist">#FFF3F5FB</color>
-    <color name="nasbox_white">#FFFFFFFF</color>
 </resources>

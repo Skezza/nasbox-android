@@ -55,6 +55,7 @@ class RunPlanBackupUseCase(
         var skippedCount = 0
         var failedCount = 0
         var summaryError: String? = null
+        var cancellationLogged = false
 
         suspend fun log(severity: String, message: String, detail: String? = null) {
             val formatted = "[runId=$runId planId=$planId] $message"
@@ -76,11 +77,20 @@ class RunPlanBackupUseCase(
 
         suspend fun persistRunningSnapshot() {
             val heartbeatAt = nowEpochMs()
+            val persistedStatus = readPersistedStatus(runId)
+            if (persistedStatus == RunStatus.CANCELED) {
+                return
+            }
+            val status = if (persistedStatus == RunStatus.CANCEL_REQUESTED) {
+                RunStatus.CANCEL_REQUESTED
+            } else {
+                RunStatus.RUNNING
+            }
             runRepository.updateRun(
                 RunEntity(
                     runId = runId,
                     planId = planId,
-                    status = RunStatus.RUNNING,
+                    status = status,
                     startedAtEpochMs = startedAt,
                     finishedAtEpochMs = null,
                     heartbeatAtEpochMs = heartbeatAt,
@@ -91,6 +101,42 @@ class RunPlanBackupUseCase(
                     summaryError = summaryError,
                     triggerSource = normalizedTriggerSource,
                 ),
+            )
+        }
+
+        suspend fun cancelIfRequested(): RunExecutionResult? {
+            val persistedStatus = readPersistedStatus(runId)
+            if (persistedStatus == RunStatus.CANCELED) {
+                if (!cancellationLogged) {
+                    cancellationLogged = true
+                    log(SEVERITY_INFO, "Run cancellation acknowledged")
+                }
+                return RunExecutionResult(
+                    runId = runId,
+                    status = RunStatus.CANCELED,
+                    uploadedCount = uploadedCount,
+                    skippedCount = skippedCount,
+                    failedCount = failedCount,
+                    summaryError = summaryError ?: DEFAULT_CANCELED_SUMMARY,
+                )
+            }
+            if (persistedStatus != RunStatus.CANCEL_REQUESTED) return null
+            if (!cancellationLogged) {
+                cancellationLogged = true
+                log(SEVERITY_INFO, "Run cancellation acknowledged")
+            }
+            return finalizeRun(
+                runId = runId,
+                planId = planId,
+                startedAt = startedAt,
+                scanned = scannedCount,
+                uploaded = uploadedCount,
+                skipped = skippedCount,
+                failed = failedCount,
+                summaryError = summaryError ?: DEFAULT_CANCELED_SUMMARY,
+                status = RunStatus.CANCELED,
+                triggerSource = normalizedTriggerSource,
+                log = ::log,
             )
         }
 
@@ -109,6 +155,7 @@ class RunPlanBackupUseCase(
         }
 
         log(SEVERITY_INFO, "Run started")
+        cancelIfRequested()?.let { return@withContext it }
 
         val plan = planRepository.getPlan(planId)
         if (plan == null) {
@@ -205,6 +252,7 @@ class RunPlanBackupUseCase(
             username = server.username,
             password = password,
         )
+        cancelIfRequested()?.let { return@withContext it }
 
         log(
             SEVERITY_INFO,
@@ -332,13 +380,17 @@ class RunPlanBackupUseCase(
         )
         persistRunningSnapshot()
         emitProgress(force = true)
+        cancelIfRequested()?.let { return@withContext it }
 
         for (item in scanResult.items) {
+            cancelIfRequested()?.let { return@withContext it }
             val record = backupRecordRepository.findByPlanAndMediaItem(planId, item.mediaId)
             if (record != null) {
                 skippedCount += 1
+                log(SEVERITY_INFO, "Skipped item", "mediaId=${item.mediaId} reason=already_backed_up")
                 persistRunningSnapshot()
                 emitProgress()
+                cancelIfRequested()?.let { return@withContext it }
                 continue
             }
 
@@ -357,6 +409,11 @@ class RunPlanBackupUseCase(
                     mediaItem = item,
                 )
             }
+            log(
+                SEVERITY_INFO,
+                "Processing item",
+                "mediaId=${item.mediaId} displayName=${item.displayName.orEmpty()} remotePath=$remotePath",
+            )
 
             val stream = mediaStoreDataSource.openMediaStream(item.mediaId)
             if (stream == null) {
@@ -393,6 +450,7 @@ class RunPlanBackupUseCase(
                 }
                 if (recordResult.isSuccess) {
                     uploadedCount += 1
+                    log(SEVERITY_INFO, "Uploaded item", "mediaId=${item.mediaId} remotePath=$remotePath")
                 } else {
                     failedCount += 1
                     val recordError = recordResult.exceptionOrNull()
@@ -410,8 +468,10 @@ class RunPlanBackupUseCase(
             }
             persistRunningSnapshot()
             emitProgress()
+            cancelIfRequested()?.let { return@withContext it }
         }
 
+        cancelIfRequested()?.let { return@withContext it }
         val finalStatus = when {
             failedCount > 0 && uploadedCount == 0 && skippedCount == 0 -> RunStatus.FAILED
             failedCount > 0 -> RunStatus.PARTIAL
@@ -497,6 +557,9 @@ class RunPlanBackupUseCase(
         }
     }
 
+    private suspend fun readPersistedStatus(runId: Long): String? =
+        runRepository.getRun(runId)?.status?.trim()?.uppercase(Locale.US)
+
     companion object {
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
         private const val SOURCE_TYPE_FOLDER = "FOLDER"
@@ -505,6 +568,7 @@ class RunPlanBackupUseCase(
         private const val SEVERITY_ERROR = "ERROR"
         private const val PROGRESS_LOG_INTERVAL = 10
         private const val LOG_TAG = "NasBoxRun"
+        private const val DEFAULT_CANCELED_SUMMARY = "Run canceled by user."
     }
 }
 
@@ -624,5 +688,5 @@ private fun skezza.nasbox.data.smb.SmbConnectionFailure.toUserMessage(): String 
     is skezza.nasbox.data.smb.SmbConnectionFailure.RemotePermissionDenied -> "Remote permissions denied upload access."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout -> "Connection timed out while uploading."
     is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption -> "Network interrupted during upload."
-    is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Unexpected SMB error during upload."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Warnings"
 }

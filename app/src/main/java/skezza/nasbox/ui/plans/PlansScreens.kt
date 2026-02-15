@@ -343,7 +343,7 @@ fun PlanEditorScreen(
             }
 
             if (servers.isEmpty()) {
-                Text("Add at least one server in Vault before creating a job.")
+                Text("Add at least one server before creating a job.")
             }
 
             ServerSelector(

@@ -30,6 +30,8 @@ import skezza.nasbox.AppContainer
 import skezza.nasbox.ui.audit.AuditRunDetailScreen
 import skezza.nasbox.ui.audit.AuditScreen
 import skezza.nasbox.ui.audit.AuditViewModel
+import skezza.nasbox.ui.dashboard.DashboardRunDetailScreen
+import skezza.nasbox.ui.dashboard.DashboardRunDetailViewModel
 import skezza.nasbox.ui.dashboard.DashboardScreen
 import skezza.nasbox.ui.dashboard.DashboardViewModel
 import skezza.nasbox.ui.plans.PlanEditorScreen
@@ -46,6 +48,7 @@ private const val ROUTE_SERVER_EDITOR = "serverEditor"
 private const val ROUTE_PLAN_EDITOR = "planEditor"
 private const val ROUTE_AUDIT = "audit"
 private const val ROUTE_AUDIT_RUN = "auditRun"
+private const val ROUTE_DASHBOARD_RUN = "dashboardRun"
 
 private enum class TopLevelDestination(
     val route: String,
@@ -54,7 +57,7 @@ private enum class TopLevelDestination(
 ) {
     DASHBOARD(route = ROUTE_DASHBOARD, label = "Dashboard", icon = Icons.Default.Dashboard),
     PLANS(route = ROUTE_PLANS, label = "Jobs", icon = Icons.Default.Folder),
-    VAULT(route = ROUTE_VAULT, label = "Vault", icon = Icons.Default.Lock),
+    VAULT(route = ROUTE_VAULT, label = "Servers", icon = Icons.Default.Lock),
 }
 
 @Composable
@@ -87,6 +90,8 @@ fun NasBoxApp(
             planRepository = appContainer.planRepository,
             serverRepository = appContainer.serverRepository,
             runRepository = appContainer.runRepository,
+            stopRunUseCase = appContainer.stopRunUseCase,
+            reconcileStaleActiveRunsUseCase = appContainer.reconcileStaleActiveRunsUseCase,
         ),
     )
     val auditViewModel: AuditViewModel = viewModel(
@@ -132,7 +137,27 @@ fun NasBoxApp(
                 DashboardScreen(
                     viewModel = dashboardViewModel,
                     onOpenAudit = { navController.navigate(ROUTE_AUDIT) },
-                    onOpenRunAudit = { runId -> navController.navigate("$ROUTE_AUDIT_RUN/$runId") },
+                    onOpenRunAudit = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
+                    onOpenCurrentRunDetail = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
+                )
+            }
+            composable(
+                route = "$ROUTE_DASHBOARD_RUN/{runId}",
+                arguments = listOf(navArgument("runId") { type = NavType.LongType }),
+            ) { backStackEntry ->
+                val runId = backStackEntry.arguments?.getLong("runId") ?: 0L
+                val runDetailViewModel: DashboardRunDetailViewModel = viewModel(
+                    key = "dashboardRunDetail-$runId",
+                    factory = DashboardRunDetailViewModel.factory(
+                        runId = runId,
+                        planRepository = appContainer.planRepository,
+                        runRepository = appContainer.runRepository,
+                        runLogRepository = appContainer.runLogRepository,
+                    ),
+                )
+                DashboardRunDetailScreen(
+                    viewModel = runDetailViewModel,
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_PLANS) {

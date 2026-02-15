@@ -113,6 +113,43 @@ class RunPlanBackupUseCaseTest {
     }
 
     @Test
+    fun invoke_cooperativelyCancelsWhenStopRequested() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val media = listOf(
+            MediaImageItem("1", "album-1", "one.jpg", "image/jpeg", 1_700_000_000_000, 4),
+            MediaImageItem("2", "album-1", "two.jpg", "image/jpeg", 1_700_000_000_100, 4),
+        )
+
+        val runRepo = FakeRunRepository().apply {
+            cancelWhenUploadedCountAtLeast = 1
+        }
+        val result = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = runRepo,
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(albumItems = media),
+            smbClient = FakeSmbClient(),
+        )(plan.planId)
+
+        assertEquals("CANCELED", result.status)
+        assertEquals(1, result.uploadedCount)
+        assertEquals(0, result.skippedCount)
+        assertEquals(0, result.failedCount)
+        assertEquals("Run canceled by user.", result.summaryError)
+        assertEquals("CANCELED", runRepo.updatedRuns.last().status)
+    }
+
+    @Test
     fun invoke_executesFolderPlanAndPreservesRelativePaths() = runBlocking {
         val plan = PlanEntity(
             planId = 10,
@@ -429,12 +466,22 @@ class RunPlanBackupUseCaseTest {
 
     private class FakeRunRepository : RunRepository {
         val updatedRuns = mutableListOf<RunEntity>()
+        var cancelWhenUploadedCountAtLeast: Int? = null
 
         override fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>> = flowOf(emptyList())
 
         override fun observeLatestRun(): Flow<RunEntity?> = flowOf(updatedRuns.lastOrNull())
 
         override fun observeLatestRuns(limit: Int): Flow<List<RunEntity>> = flowOf(updatedRuns.takeLast(limit))
+
+        override fun observeLatestRunsByStatuses(limit: Int, statuses: Set<String>): Flow<List<RunEntity>> {
+            val normalized = statuses.map { it.trim().uppercase() }.toSet()
+            return flowOf(
+                updatedRuns
+                    .filter { it.status.trim().uppercase() in normalized }
+                    .takeLast(limit),
+            )
+        }
 
         override fun observeRunsByStatus(status: String): Flow<List<RunEntity>> =
             flowOf(updatedRuns.filter { it.status == status })
@@ -447,11 +494,30 @@ class RunPlanBackupUseCaseTest {
             updatedRuns += run
         }
 
-        override suspend fun getRun(runId: Long): RunEntity? = updatedRuns.lastOrNull { it.runId == runId }
+        override suspend fun getRun(runId: Long): RunEntity? {
+            val latest = updatedRuns.lastOrNull { it.runId == runId } ?: return null
+            val cancelAt = cancelWhenUploadedCountAtLeast
+            return if (
+                cancelAt != null &&
+                latest.status == RunStatus.RUNNING &&
+                latest.uploadedCount >= cancelAt
+            ) {
+                latest.copy(status = RunStatus.CANCEL_REQUESTED)
+            } else {
+                latest
+            }
+        }
 
         override suspend fun runsByStatus(status: String): List<RunEntity> = updatedRuns.filter { it.status == status }
 
         override suspend fun latestRuns(limit: Int): List<RunEntity> = emptyList()
+
+        override suspend fun latestRunsByStatuses(limit: Int, statuses: Set<String>): List<RunEntity> {
+            val normalized = statuses.map { it.trim().uppercase() }.toSet()
+            return updatedRuns
+                .filter { it.status.trim().uppercase() in normalized }
+                .takeLast(limit)
+        }
     }
 
     private class FakeRunLogRepository : RunLogRepository {

@@ -275,6 +275,13 @@ private fun FilterRow(
                 label = { Text("Interrupted") },
             )
             FilterChip(
+                selected = selected == AuditFilter.CANCELED,
+                onClick = { onSelected(AuditFilter.CANCELED) },
+                label = { Text("Canceled") },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilterChip(
                 selected = selected == AuditFilter.RUNNING,
                 onClick = { onSelected(AuditFilter.RUNNING) },
                 label = { Text("Running") },
@@ -288,6 +295,8 @@ private fun statusLabel(status: String): String = when (status.uppercase(Locale.
     RunStatus.PARTIAL -> "Partial"
     RunStatus.FAILED -> "Failed"
     RunStatus.RUNNING -> "Running"
+    RunStatus.CANCEL_REQUESTED -> "Cancel requested"
+    RunStatus.CANCELED -> "Canceled"
     RunStatus.INTERRUPTED -> "Interrupted"
     else -> status
 }

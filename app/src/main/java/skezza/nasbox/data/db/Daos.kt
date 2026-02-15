@@ -72,6 +72,12 @@ interface RunDao {
     @Query("SELECT * FROM runs ORDER BY started_at_epoch_ms DESC LIMIT :limit")
     suspend fun getLatest(limit: Int): List<RunEntity>
 
+    @Query("SELECT * FROM runs WHERE status IN (:statuses) ORDER BY started_at_epoch_ms DESC LIMIT :limit")
+    fun observeLatestByStatuses(limit: Int, statuses: List<String>): Flow<List<RunEntity>>
+
+    @Query("SELECT * FROM runs WHERE status IN (:statuses) ORDER BY started_at_epoch_ms DESC LIMIT :limit")
+    suspend fun getLatestByStatuses(limit: Int, statuses: List<String>): List<RunEntity>
+
     @Query("SELECT * FROM runs WHERE status = :status ORDER BY started_at_epoch_ms DESC")
     fun observeByStatus(status: String): Flow<List<RunEntity>>
 

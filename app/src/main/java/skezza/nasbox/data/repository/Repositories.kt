@@ -77,6 +77,7 @@ interface RunRepository {
     fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>>
     fun observeLatestRun(): Flow<RunEntity?>
     fun observeLatestRuns(limit: Int): Flow<List<RunEntity>>
+    fun observeLatestRunsByStatuses(limit: Int, statuses: Set<String>): Flow<List<RunEntity>>
     fun observeRunsByStatus(status: String): Flow<List<RunEntity>>
     fun observeRun(runId: Long): Flow<RunEntity?>
     suspend fun createRun(run: RunEntity): Long
@@ -84,6 +85,7 @@ interface RunRepository {
     suspend fun getRun(runId: Long): RunEntity?
     suspend fun runsByStatus(status: String): List<RunEntity>
     suspend fun latestRuns(limit: Int): List<RunEntity>
+    suspend fun latestRunsByStatuses(limit: Int, statuses: Set<String>): List<RunEntity>
 }
 
 class DefaultRunRepository(
@@ -94,6 +96,9 @@ class DefaultRunRepository(
     override fun observeLatestRun(): Flow<RunEntity?> = runDao.observeLatest()
 
     override fun observeLatestRuns(limit: Int): Flow<List<RunEntity>> = runDao.observeLatestRuns(limit)
+
+    override fun observeLatestRunsByStatuses(limit: Int, statuses: Set<String>): Flow<List<RunEntity>> =
+        runDao.observeLatestByStatuses(limit, statuses.toList())
 
     override fun observeRunsByStatus(status: String): Flow<List<RunEntity>> = runDao.observeByStatus(status)
 
@@ -108,6 +113,9 @@ class DefaultRunRepository(
     override suspend fun runsByStatus(status: String): List<RunEntity> = runDao.getByStatus(status)
 
     override suspend fun latestRuns(limit: Int): List<RunEntity> = runDao.getLatest(limit)
+
+    override suspend fun latestRunsByStatuses(limit: Int, statuses: Set<String>): List<RunEntity> =
+        runDao.getLatestByStatuses(limit, statuses.toList())
 }
 
 interface RunLogRepository {
