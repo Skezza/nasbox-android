@@ -14,6 +14,7 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 5.5 — Source expansion execution (folder + full-device): **Completed**.
 - ✅ Phase 5.5.1 — Share discovery fallback: **Completed**.
 - ✅ Phase 6 — Dashboard mission control: **Completed**.
+- 🧭 Phase 6.5 — Dashboard improvements (run control + live current runs): **Proposed**.
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
 - Validate phase exit criteria before advancing.
@@ -299,6 +300,50 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 
 ---
 
+## Phase 6.5 — Dashboard improvements (run control + live current runs)
+
+### Why this exists
+- Phase 6 established observability but does not yet let users stop an active run.
+- Dashboard currently blends live and historical data; we need explicit separation between active operations and audit history.
+- Top health-card refinement is intentionally deferred until active-run control and visibility are stable.
+
+### Goals
+- Add direct control to stop active runs from dashboard surfaces.
+- Introduce a dedicated `Current runs` section that appears only while runs are active and streams live telemetry.
+- Add a run-detail drill-in that shows live per-file updates.
+- Keep `Recent runs` historical-only for audit (no in-place live mutation from active runs).
+
+### Work
+- Implement cooperative stop/cancel behavior in run orchestration:
+  - add stop request pathway (single-run and optional stop-all entrypoint),
+  - persist transitional state (`CANCEL_REQUESTED`/`STOPPING`) and terminal `CANCELED`,
+  - finalize canceled runs with consistent counters, summary, and log detail.
+- Split dashboard data contracts into explicit streams:
+  - `Current runs`: active statuses only (for example `RUNNING` and `CANCEL_REQUESTED`) with live counters/progress.
+  - `Recent runs`: terminal statuses only (`SUCCESS`, `PARTIAL`, `FAILED`, `CANCELED`) for historical audit.
+- Upgrade dashboard UI:
+  - render `Current runs` only when at least one run is active,
+  - show per-run progress bars plus live numeric counters (`scanned`, `uploaded`, `skipped`, `failed`),
+  - provide stop controls with in-flight guard states and confirmation UX,
+  - allow tapping an active run to open a live detail screen.
+- Add live run detail behavior:
+  - show status + aggregate counters + current-file indicator,
+  - stream rolling per-file events from run logs,
+  - hand off finished runs to `Recent runs` automatically after terminalization.
+- Keep health card changes out of this phase except minor compatibility updates needed for the new section layout.
+
+### Exit criteria
+- User can stop an active run and see deterministic transition to `CANCELED` with persisted audit data.
+- `Current runs` appears when active work exists and auto-hides when none are active.
+- Progress bars and numeric counters update live during active runs without blocking UI.
+- Tapping an active run opens live detail with file-level updates.
+- `Recent runs` shows historical terminal runs only.
+
+### Implementation status
+- 🧭 Proposed: approved direction for the next dashboard-focused implementation pass.
+
+---
+
 ## Phase 7 — UX hardening and resilience
 
 ### Goals
@@ -338,10 +383,11 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 1. User can add SMB server and run connection test with clear pass/fail output.
 2. User can create a plan with album source and server destination.
 3. Dashboard can trigger manual run.
-4. Progress is visible during run without UI freeze.
-5. Post-run summary and timeline are persisted and displayed.
-6. Re-running avoids duplicate uploads via proof records.
-7. Auth/network and path errors are user-visible and logged.
+4. Progress is visible during active runs without UI freeze.
+5. User can stop an active run and receive a persisted `CANCELED` result with counters/logs.
+6. Recent runs remains historical-only and suitable for audit review.
+7. Re-running avoids duplicate uploads via proof records.
+8. Auth/network and path errors are user-visible and logged.
 
 ---
 
@@ -350,3 +396,4 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - ✅ Phase 5.5 source-expansion execution is now landed before dashboard mission-control work.
 - Keep dashboard wiring thin until run and log repositories are stable.
 - Treat run logs as first-class data early to reduce debugging friction in later phases.
+- Phase 6.5 (active-run control + current-vs-recent split) should land before additional dashboard health-card enhancements.

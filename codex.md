@@ -36,8 +36,9 @@ This document defines required behavior for future Codex implementation passes.
 - Archive-only means no local or remote deletes.
 - New-item detection is based on backup proof records.
 - Per-file failures must not crash the whole run.
-- Final run status must correctly represent SUCCESS, PARTIAL, or FAILED.
+- Final run status must correctly represent SUCCESS, PARTIAL, FAILED, or CANCELED.
 - Run metrics and logs must be persisted for diagnostics.
+- Stop/cancel requests must be handled cooperatively and leave a complete run audit trail.
 
 ## 7) Path and filename rules
 - Build destination path from base path + template + filename pattern.
@@ -63,8 +64,10 @@ This document defines required behavior for future Codex implementation passes.
 - Always provide loading, empty, and failure states for user-facing lists/actions.
 
 ## 11) Progress and observability rules
-- Every run must emit start, progress, and finish events.
-- Dashboard should reflect active run progress and recent outcomes.
+- Every run must emit start, progress, stop (when requested), and finish events.
+- Dashboard must separate live `Current runs` from historical `Recent runs`.
+- `Current runs` must be actionable (stop control), live-updating, and hidden when empty.
+- `Recent runs` must be audit-focused and terminal-status only.
 - Timeline entries should remain concise and human-readable.
 
 ## 12) Testing rules

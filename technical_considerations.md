@@ -9,7 +9,8 @@ This document defines the architectural and technical decisions for delivering V
 - Configure SMB servers (host/share/base path/auth credentials).
 - Create sync plans mapping local image album to SMB destination structure.
 - Manual “Run now” backup execution.
-- Real-time run progress and persisted run logs.
+- Manual stop/cancel control for active runs with persisted run audit.
+- Real-time active-run progress and persisted run logs.
 - Local proof-of-backup records to prevent duplicate uploads.
 
 ### Out of scope
@@ -29,13 +30,14 @@ Adopt a layered architecture to keep implementation incremental and testable.
   - Dashboard
   - Plans
   - Vault
-- Additional routes for plan editing, server editing, and optional run detail.
+- Additional routes for plan editing, server editing, and run detail.
 - ViewModels own UI state via immutable state models and StateFlow.
 - Composables are rendering-focused and event-driven.
 
 ### Domain layer
 - Explicit use cases for:
   - running sync plan
+  - stopping active sync run
   - testing SMB connection
   - listing albums
 - Domain orchestration owns business rules (archive-only, skip logic, status rules).
@@ -152,9 +154,10 @@ All path and filename segments must be sanitized for SMB/Windows-illegal charact
 - Create run entry at start.
 - Scan media set.
 - For each item: skip or upload.
+- Honor stop requests cooperatively between item boundaries/major IO operations.
 - Persist proof record after successful upload.
-- Log important events throughout.
-- Finalize run with SUCCESS, PARTIAL, or FAILED based on counters and errors.
+- Log important events throughout, including stop request and stop completion.
+- Finalize run with SUCCESS, PARTIAL, FAILED, or CANCELED based on counters/errors/stop intent.
 
 ### Error resilience
 - Continue-on-error for per-file failures.
@@ -183,7 +186,10 @@ Each mapped error should provide:
 ## UX-state rules tied to data
 - Dashboard should derive status from selected plan, server test recency, and latest run.
 - Vault health indicator should use last test outcome and age thresholds.
-- Timeline should read from persisted run logs (most recent first).
+- Dashboard should split live `Current runs` (active statuses) from historical `Recent runs` (terminal statuses only).
+- `Current runs` should auto-hide when no run is active and expose stop control + live counters/progress.
+- `Recent runs` should be audit-focused and need not stream active-run updates in real time.
+- Run detail should show live per-file activity for active runs using run-log events.
 - If prerequisites are missing (no server/plan/permissions), show actionable CTA.
 
 ---
@@ -192,7 +198,7 @@ Each mapped error should provide:
 - Stream uploads; avoid full file buffering.
 - Run media and SMB operations on IO dispatcher.
 - Keep progress updates throttled to practical UI frequency.
-- Support cancellation safely and finalize run state correctly.
+- Support cancellation safely, idempotently, and finalize run state correctly.
 - Prefer defensive null and exception handling around content resolver streams.
 
 ---
@@ -332,3 +338,19 @@ Each mapped error should provide:
   - latest timeline stream (run-log rows joined to runs, newest first)
 - `RunPlanBackupUseCase` now persists incremental `RUNNING` snapshots (scanned/uploaded/skipped/failed/summary) and emits explicit progress log events so UI progress and timeline update during active runs.
 - Dashboard now surfaces missing-prerequisite CTAs when no server or no plan exists, and displays a live progress strip while latest run status is `RUNNING`.
+- Known gap carried into Phase 6.5: active runs are observable but not directly controllable from dashboard, and historical timeline concerns are not fully separated from live-run UX.
+
+## Phase 6.5 proposed implementation notes
+- Add a dedicated `StopRunUseCase` (or equivalent command path) that requests cooperative cancellation and persists transitional `CANCEL_REQUESTED`/`STOPPING` intent before terminalizing as `CANCELED`.
+- Extend run-status handling so cancellation is first-class in domain logic, repository queries, and UI mapping.
+- Split dashboard data contracts:
+  - active-run query for `Current runs` (`RUNNING` + cancellation-in-progress statuses), observed as live stream.
+  - historical query for `Recent runs` (`SUCCESS`, `PARTIAL`, `FAILED`, `CANCELED`), rendered as audit list.
+- Expand dashboard UI into two explicit sections:
+  - `Current runs`: visible only when non-empty, includes progress bar, live counters, and stop action(s).
+  - `Recent runs`: always historical-only, no expectation of file-level live updates.
+- Add live run detail route/state with:
+  - active counter header and progress indicator,
+  - currently processing file snapshot,
+  - rolling file-event feed sourced from run logs.
+- Keep health-card redesign out of scope for 6.5 except layout adjustments required to accommodate the new current-runs section.
