@@ -68,7 +68,7 @@ class ValidatePlanInputUseCase {
         }
 
         return PlanValidationResult(
-            nameError = if (input.name.trim().isBlank()) "Plan name is required." else null,
+            nameError = if (input.name.trim().isBlank()) "Job name is required." else null,
             albumError = albumError,
             folderPathError = folderError,
             serverError = if (input.selectedServerId == null) "Select a destination server." else null,

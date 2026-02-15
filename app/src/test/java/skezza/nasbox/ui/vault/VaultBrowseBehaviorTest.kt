@@ -1,11 +1,14 @@
 package skezza.nasbox.ui.vault
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Rule
 import org.junit.Test
+import skezza.nasbox.MainDispatcherRule
 import skezza.nasbox.data.db.ServerEntity
 import skezza.nasbox.data.discovery.DiscoveredSmbServer
 import skezza.nasbox.data.discovery.SmbServerDiscoveryScanner
@@ -19,7 +22,11 @@ import skezza.nasbox.domain.smb.BrowseSmbDestinationUseCase
 import skezza.nasbox.domain.smb.TestSmbConnectionUseCase
 import skezza.nasbox.data.smb.SmbShareRpcEnumerator
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class VaultBrowseBehaviorTest {
+
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
 
     @Test
     fun openBrowseDestination_slashShareLoadsSharesInsteadOfDirectories() = runTest {

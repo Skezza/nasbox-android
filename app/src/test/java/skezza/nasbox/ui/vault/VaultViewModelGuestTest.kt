@@ -7,7 +7,9 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import skezza.nasbox.MainDispatcherRule
 import skezza.nasbox.data.db.ServerEntity
 import skezza.nasbox.data.discovery.DiscoveredSmbServer
 import skezza.nasbox.data.discovery.SmbServerDiscoveryScanner
@@ -24,6 +26,9 @@ import skezza.nasbox.domain.smb.TestSmbConnectionUseCase
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VaultViewModelGuestTest {
+
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
 
     @Test
     fun openBrowseDestination_guestSuccessShowsShares() = runTest {

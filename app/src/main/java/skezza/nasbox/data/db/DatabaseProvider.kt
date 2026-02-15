@@ -17,8 +17,6 @@ object DatabaseProvider {
         }
     }
 
-
-
     private val migration2To3 = object : Migration(2, 3) {
         override fun migrate(database: SupportSQLiteDatabase) {
             database.execSQL("ALTER TABLE plans ADD COLUMN source_type TEXT NOT NULL DEFAULT 'ALBUM'")
@@ -34,14 +32,42 @@ object DatabaseProvider {
         }
     }
 
+    private val migration4To5 = object : Migration(4, 5) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE plans ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0")
+            database.execSQL("ALTER TABLE plans ADD COLUMN schedule_time_minutes INTEGER NOT NULL DEFAULT 120")
+
+            database.execSQL("ALTER TABLE runs ADD COLUMN heartbeat_at_epoch_ms INTEGER NOT NULL DEFAULT 0")
+            database.execSQL("ALTER TABLE runs ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'MANUAL'")
+            database.execSQL(
+                "UPDATE runs SET heartbeat_at_epoch_ms = COALESCE(finished_at_epoch_ms, started_at_epoch_ms)",
+            )
+            database.execSQL("CREATE INDEX IF NOT EXISTS index_runs_status ON runs(status)")
+        }
+    }
+
+    private val migration5To6 = object : Migration(5, 6) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE plans ADD COLUMN schedule_frequency TEXT NOT NULL DEFAULT 'DAILY'")
+            database.execSQL("ALTER TABLE plans ADD COLUMN schedule_days_mask INTEGER NOT NULL DEFAULT 127")
+            database.execSQL("ALTER TABLE plans ADD COLUMN schedule_day_of_month INTEGER NOT NULL DEFAULT 1")
+            database.execSQL("ALTER TABLE plans ADD COLUMN schedule_interval_hours INTEGER NOT NULL DEFAULT 24")
+        }
+    }
+
     fun get(context: Context): NasBoxDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 NasBoxDatabase::class.java,
                 "nasbox.db",
-            ).addMigrations(migration1To2, migration2To3)
-                .addMigrations(migration3To4)
+            ).addMigrations(
+                migration1To2,
+                migration2To3,
+                migration3To4,
+                migration4To5,
+                migration5To6,
+            )
                 .build().also { instance = it }
         }
     }

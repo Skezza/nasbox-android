@@ -322,3 +322,13 @@ Each mapped error should provide:
 - Source item streams now resolve from numeric MediaStore IDs, content URIs, or file URIs via the media data-source abstraction.
 - Plans **Run now** permission requests are source-aware on Android 13+: album runs request image (and optional video) access, full-device runs request image/video/audio, and folder runs rely on folder-level URI grants when applicable.
 - Backup-proof deduplication remains keyed by `(plan_id, media_item_id)` and now uses stable source identifiers for folder/full-device items.
+
+## Phase 6 implementation notes
+- Dashboard mission control is now implemented with a dedicated `DashboardViewModel` and Compose screen wired to the top-level dashboard route.
+- Dashboard status card derives vault health from persisted server test telemetry and test-age thresholds, and summarizes latest run status/counters/error context.
+- Dashboard primary actions now support selecting a plan for **Run now** and selecting a server for **Test connection**, with guardrails for disabled plans and in-flight actions.
+- Run observability now uses flow-backed repository queries:
+  - latest run stream (`runs ORDER BY started_at DESC LIMIT 1`)
+  - latest timeline stream (run-log rows joined to runs, newest first)
+- `RunPlanBackupUseCase` now persists incremental `RUNNING` snapshots (scanned/uploaded/skipped/failed/summary) and emits explicit progress log events so UI progress and timeline update during active runs.
+- Dashboard now surfaces missing-prerequisite CTAs when no server or no plan exists, and displays a live progress strip while latest run status is `RUNNING`.

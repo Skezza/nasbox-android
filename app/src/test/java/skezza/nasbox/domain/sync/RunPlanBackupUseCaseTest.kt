@@ -12,6 +12,7 @@ import skezza.nasbox.data.db.BackupRecordEntity
 import skezza.nasbox.data.db.PlanEntity
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
+import skezza.nasbox.data.db.RunTimelineLogRow
 import skezza.nasbox.data.db.ServerEntity
 import skezza.nasbox.data.media.FullDeviceScanResult
 import skezza.nasbox.data.media.MediaAlbum
@@ -72,7 +73,43 @@ class RunPlanBackupUseCaseTest {
         assertEquals("photos/Camera/two.jpg", smbClient.uploadedPaths.first())
         assertTrue(backupRepo.createdRecords.any { it.mediaItemId == "2" })
         assertEquals("SUCCESS", runRepo.updatedRuns.last().status)
+        assertTrue(runRepo.updatedRuns.any { it.status == "RUNNING" })
         assertTrue(logRepo.logs.any { it.message == "Run finished" })
+        assertTrue(logRepo.logs.any { it.message == "Run progress" })
+    }
+
+    @Test
+    fun invoke_persistsRunningCountersBeforeFinalStatus() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val media = listOf(
+            MediaImageItem("1", "album-1", "one.jpg", "image/jpeg", 1_700_000_000_000, 4),
+            MediaImageItem("2", "album-1", "two.jpg", "image/jpeg", 1_700_000_000_100, 4),
+        )
+
+        val runRepo = FakeRunRepository()
+        runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "1"),
+            runRepo = runRepo,
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(albumItems = media),
+            smbClient = FakeSmbClient(),
+        )(plan.planId)
+
+        val runningSnapshots = runRepo.updatedRuns.filter { it.status == "RUNNING" }
+        assertTrue(runningSnapshots.isNotEmpty())
+        assertTrue(runningSnapshots.any { it.scannedCount == media.size })
+        assertTrue(runningSnapshots.any { it.skippedCount > 0 || it.uploadedCount > 0 || it.failedCount > 0 })
+        assertEquals("SUCCESS", runRepo.updatedRuns.last().status)
     }
 
     @Test
@@ -395,11 +432,24 @@ class RunPlanBackupUseCaseTest {
 
         override fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>> = flowOf(emptyList())
 
+        override fun observeLatestRun(): Flow<RunEntity?> = flowOf(updatedRuns.lastOrNull())
+
+        override fun observeLatestRuns(limit: Int): Flow<List<RunEntity>> = flowOf(updatedRuns.takeLast(limit))
+
+        override fun observeRunsByStatus(status: String): Flow<List<RunEntity>> =
+            flowOf(updatedRuns.filter { it.status == status })
+
+        override fun observeRun(runId: Long): Flow<RunEntity?> = flowOf(updatedRuns.lastOrNull { it.runId == runId })
+
         override suspend fun createRun(run: RunEntity): Long = 5
 
         override suspend fun updateRun(run: RunEntity) {
             updatedRuns += run
         }
+
+        override suspend fun getRun(runId: Long): RunEntity? = updatedRuns.lastOrNull { it.runId == runId }
+
+        override suspend fun runsByStatus(status: String): List<RunEntity> = updatedRuns.filter { it.status == status }
 
         override suspend fun latestRuns(limit: Int): List<RunEntity> = emptyList()
     }
@@ -413,6 +463,11 @@ class RunPlanBackupUseCaseTest {
         }
 
         override suspend fun logsForRun(runId: Long): List<RunLogEntity> = logs
+
+        override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> =
+            flowOf(logs.filter { it.runId == runId }.sortedByDescending { it.timestampEpochMs }.take(limit))
+
+        override fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>> = flowOf(emptyList())
     }
 
     private class FakeCredentialStore(private val password: String?) : CredentialStore {

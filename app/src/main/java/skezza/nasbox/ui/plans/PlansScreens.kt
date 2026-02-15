@@ -1,23 +1,25 @@
 package skezza.nasbox.ui.plans
 
 import android.Manifest
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -35,6 +37,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -48,13 +51,18 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import skezza.nasbox.domain.plan.PlanSourceType
+import skezza.nasbox.domain.schedule.PLAN_MAX_INTERVAL_HOURS
+import skezza.nasbox.domain.schedule.PlanScheduleFrequency
+import skezza.nasbox.domain.schedule.PlanScheduleWeekday
+import skezza.nasbox.domain.schedule.formatMinutesOfDay
+import skezza.nasbox.domain.schedule.formatPlanScheduleSummary
+import skezza.nasbox.domain.schedule.isDaySelected
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,7 +89,7 @@ fun PlansScreen(
         if (denied.isEmpty() && planId != null) {
             onRunPlan(planId)
         } else if (denied.isNotEmpty()) {
-            viewModel.showMessage("Required media permission was denied for this plan source.")
+            viewModel.showMessage("Required media permission was denied for this job source.")
         }
     }
 
@@ -95,13 +103,13 @@ fun PlansScreen(
         topBar = {
             TopAppBar(
                 expandedHeight = 56.dp,
-                title = { Text("Plans") },
+                title = { Text("Jobs") },
                 actions = {
                     IconButton(
                         modifier = Modifier.size(52.dp),
                         onClick = onAddPlan,
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add plan")
+                        Icon(Icons.Default.Add, contentDescription = "Add job")
                     }
                 },
             )
@@ -117,10 +125,10 @@ fun PlansScreen(
                     .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text("No plans yet. Add your first backup plan.")
+                Text("No jobs yet. Add your first backup job.")
                 ElevatedButton(onClick = onAddPlan, modifier = Modifier.padding(top = 12.dp)) {
                     Icon(Icons.Default.Add, contentDescription = null)
-                    Text("Add plan", modifier = Modifier.padding(start = 8.dp))
+                    Text("Add job", modifier = Modifier.padding(start = 8.dp))
                 }
             }
         } else {
@@ -150,6 +158,7 @@ fun PlansScreen(
                                 Text("Template: ${plan.template}")
                                 Text("Filename: ${plan.filenamePattern}")
                             }
+                            Text("Schedule: ${plan.scheduleSummary}")
                             Text(if (plan.enabled) "Enabled" else "Disabled")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
@@ -237,7 +246,7 @@ fun PlanEditorScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (planId == null) "New Plan" else "Edit Plan") },
+                title = { Text(if (planId == null) "New Job" else "Edit Job") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -258,7 +267,7 @@ fun PlanEditorScreen(
             OutlinedTextField(
                 value = editorState.name,
                 onValueChange = viewModel::updateEditorName,
-                label = { Text("Plan name") },
+                label = { Text("Job name") },
                 isError = editorState.validation.nameError != null,
                 supportingText = { editorState.validation.nameError?.let { Text(it) } },
                 singleLine = true,
@@ -277,7 +286,7 @@ fun PlanEditorScreen(
                         Button(onClick = { permissionLauncher.launch(permission) }) { Text("Grant media access") }
                     } else {
                         if (isLoadingAlbums) Text("Loading albums...")
-                        if (albums.isEmpty()) Text("No albums found. Capture or import photos to create plans.")
+                        if (albums.isEmpty()) Text("No albums found. Capture or import photos to create jobs.")
                         AlbumSelector(
                             options = albums,
                             selectedAlbumId = editorState.selectedAlbumId,
@@ -326,7 +335,7 @@ fun PlanEditorScreen(
                                 Icon(Icons.Default.Info, contentDescription = null)
                                 Text("Full phone backup")
                             }
-                            Text("This plan will attempt to back up shared-storage folders (for example DCIM, Pictures, Movies, Download, Documents, Music).")
+                            Text("This job will attempt to back up shared-storage folders (for example DCIM, Pictures, Movies, Download, Documents, Music).")
                             Text("Heads up: this can take a long time and use plenty of battery. Best run overnight while charging.")
                         }
                     }
@@ -334,7 +343,7 @@ fun PlanEditorScreen(
             }
 
             if (servers.isEmpty()) {
-                Text("Add at least one server in Vault before creating a plan.")
+                Text("Add at least one server in Vault before creating a job.")
             }
 
             ServerSelector(
@@ -375,8 +384,76 @@ fun PlanEditorScreen(
                 Switch(checked = editorState.enabled, onCheckedChange = viewModel::updateEditorEnabled)
             }
 
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Run automatically")
+                Switch(
+                    checked = editorState.scheduleEnabled,
+                    onCheckedChange = viewModel::updateEditorScheduleEnabled,
+                )
+            }
+
+            if (editorState.scheduleEnabled) {
+                Text("Quick presets")
+                SchedulePresetChips(onSelect = viewModel::applySchedulePreset)
+
+                Text("Recurrence")
+                RecurrenceSelector(
+                    selectedFrequency = editorState.scheduleFrequency,
+                    onSelect = viewModel::updateEditorScheduleFrequency,
+                )
+
+                when (editorState.scheduleFrequency) {
+                    PlanScheduleFrequency.DAILY -> {
+                        ScheduleTimeButton(
+                            scheduleTimeMinutes = editorState.scheduleTimeMinutes,
+                            onPicked = viewModel::updateEditorScheduleTimeMinutes,
+                        )
+                    }
+
+                    PlanScheduleFrequency.WEEKLY -> {
+                        WeekdaySelector(
+                            daysMask = editorState.scheduleDaysMask,
+                            onToggle = viewModel::toggleEditorScheduleWeekday,
+                        )
+                        ScheduleTimeButton(
+                            scheduleTimeMinutes = editorState.scheduleTimeMinutes,
+                            onPicked = viewModel::updateEditorScheduleTimeMinutes,
+                        )
+                    }
+
+                    PlanScheduleFrequency.MONTHLY -> {
+                        MonthlyDaySelector(
+                            dayOfMonth = editorState.scheduleDayOfMonth,
+                            onSelect = viewModel::updateEditorScheduleDayOfMonth,
+                        )
+                        Text("If the selected day is missing for a month, the run falls back to the last day.")
+                        ScheduleTimeButton(
+                            scheduleTimeMinutes = editorState.scheduleTimeMinutes,
+                            onPicked = viewModel::updateEditorScheduleTimeMinutes,
+                        )
+                    }
+
+                    PlanScheduleFrequency.INTERVAL_HOURS -> {
+                        IntervalHoursStepper(
+                            intervalHours = editorState.scheduleIntervalHours,
+                            onChange = viewModel::updateEditorScheduleIntervalHours,
+                        )
+                    }
+                }
+            }
+
+            val scheduleHint = formatPlanScheduleSummary(
+                enabled = editorState.scheduleEnabled,
+                frequency = editorState.scheduleFrequency,
+                scheduleTimeMinutes = editorState.scheduleTimeMinutes,
+                scheduleDaysMask = editorState.scheduleDaysMask,
+                scheduleDayOfMonth = editorState.scheduleDayOfMonth,
+                scheduleIntervalHours = editorState.scheduleIntervalHours,
+            )
+            Text("Schedule: $scheduleHint")
+
             Button(onClick = { viewModel.savePlan(onNavigateBack) }) {
-                Text(if (planId == null) "Create plan" else "Save changes")
+                Text(if (planId == null) "Create job" else "Save changes")
             }
         }
     }
@@ -402,6 +479,176 @@ private fun requiredRunPermissions(
             Manifest.permission.READ_MEDIA_AUDIO,
         )
     }
+}
+
+@Composable
+private fun SchedulePresetChips(onSelect: (PlanSchedulePreset) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SchedulePresetChip(
+            label = "Nightly",
+            onClick = { onSelect(PlanSchedulePreset.NIGHTLY) },
+        )
+        SchedulePresetChip(
+            label = "Workdays",
+            onClick = { onSelect(PlanSchedulePreset.WORKDAYS) },
+        )
+        SchedulePresetChip(
+            label = "Weekend",
+            onClick = { onSelect(PlanSchedulePreset.WEEKEND) },
+        )
+        SchedulePresetChip(
+            label = "Every 6h",
+            onClick = { onSelect(PlanSchedulePreset.EVERY_6_HOURS) },
+        )
+    }
+}
+
+@Composable
+private fun SchedulePresetChip(
+    label: String,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = false,
+        onClick = onClick,
+        label = { Text(label, maxLines = 1) },
+    )
+}
+
+@Composable
+private fun RecurrenceSelector(
+    selectedFrequency: PlanScheduleFrequency,
+    onSelect: (PlanScheduleFrequency) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PlanScheduleFrequency.entries.forEach { frequency ->
+            FilterChip(
+                selected = selectedFrequency == frequency,
+                onClick = { onSelect(frequency) },
+                label = { Text(frequencyLabel(frequency), maxLines = 1) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeekdaySelector(
+    daysMask: Int,
+    onToggle: (PlanScheduleWeekday) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PlanScheduleWeekday.entries.forEach { weekday ->
+            FilterChip(
+                selected = isDaySelected(daysMask, weekday),
+                onClick = { onToggle(weekday) },
+                label = { Text(weekday.shortLabel, maxLines = 1) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonthlyDaySelector(
+    dayOfMonth: Int,
+    onSelect: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Day of month")
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("$dayOfMonth")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            (1..31).forEach { value ->
+                DropdownMenuItem(
+                    text = { Text(value.toString()) },
+                    onClick = {
+                        expanded = false
+                        onSelect(value)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun IntervalHoursStepper(
+    intervalHours: Int,
+    onChange: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text("Every")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { onChange(intervalHours - 1) },
+                enabled = intervalHours > 1,
+            ) {
+                Text("-")
+            }
+            Text("${intervalHours}h", modifier = Modifier.padding(top = 10.dp))
+            OutlinedButton(
+                onClick = { onChange(intervalHours + 1) },
+                enabled = intervalHours < PLAN_MAX_INTERVAL_HOURS,
+            ) {
+                Text("+")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleTimeButton(
+    scheduleTimeMinutes: Int,
+    onPicked: (Int) -> Unit,
+) {
+    val context = LocalContext.current
+    ElevatedButton(
+        onClick = {
+            TimePickerDialog(
+                context,
+                { _, selectedHour, selectedMinute ->
+                    onPicked(selectedHour * 60 + selectedMinute)
+                },
+                scheduleTimeMinutes / 60,
+                scheduleTimeMinutes % 60,
+                true,
+            ).show()
+        },
+    ) {
+        Text("Time: ${formatMinutesOfDay(scheduleTimeMinutes)}")
+    }
+}
+
+private fun frequencyLabel(frequency: PlanScheduleFrequency): String = when (frequency) {
+    PlanScheduleFrequency.DAILY -> "Daily"
+    PlanScheduleFrequency.WEEKLY -> "Weekly"
+    PlanScheduleFrequency.MONTHLY -> "Monthly"
+    PlanScheduleFrequency.INTERVAL_HOURS -> "Every X hours"
 }
 
 @Composable

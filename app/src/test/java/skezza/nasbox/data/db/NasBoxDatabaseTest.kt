@@ -167,6 +167,83 @@ class NasBoxDatabaseTest {
     }
 
     @Test
+    fun latestRunAndTimelineQueries_returnMostRecentEntries() = runBlocking {
+        val serverId = database.serverDao().insert(
+            ServerEntity(
+                name = "Server Three",
+                host = "host",
+                shareName = "share",
+                basePath = "root",
+                domain = "",
+                username = "name",
+                credentialAlias = "vault/three",
+            ),
+        )
+        val planId = database.planDao().insert(
+            PlanEntity(
+                name = "Plan C",
+                sourceAlbum = "Camera",
+                serverId = serverId,
+                directoryTemplate = "{year}/{month}",
+                filenamePattern = "{mediaId}.{ext}",
+                enabled = true,
+            ),
+        )
+
+        val olderRunId = database.runDao().insert(
+            RunEntity(
+                planId = planId,
+                status = "SUCCESS",
+                startedAtEpochMs = 100L,
+                finishedAtEpochMs = 120L,
+                scannedCount = 1,
+                uploadedCount = 1,
+                skippedCount = 0,
+                failedCount = 0,
+            ),
+        )
+        val latestRunId = database.runDao().insert(
+            RunEntity(
+                planId = planId,
+                status = "RUNNING",
+                startedAtEpochMs = 300L,
+                finishedAtEpochMs = null,
+                scannedCount = 4,
+                uploadedCount = 1,
+                skippedCount = 2,
+                failedCount = 0,
+            ),
+        )
+
+        database.runLogDao().insert(
+            RunLogEntity(
+                runId = olderRunId,
+                timestampEpochMs = 110L,
+                severity = "INFO",
+                message = "Older log",
+            ),
+        )
+        database.runLogDao().insert(
+            RunLogEntity(
+                runId = latestRunId,
+                timestampEpochMs = 320L,
+                severity = "INFO",
+                message = "Latest log",
+            ),
+        )
+
+        val latestRun = database.runDao().observeLatest().first()
+        val timeline = database.runLogDao().observeLatestTimeline(limit = 10).first()
+
+        assertNotNull(latestRun)
+        assertEquals(latestRunId, latestRun?.runId)
+        assertEquals(2, timeline.size)
+        assertEquals("Latest log", timeline.first().message)
+        assertEquals(latestRunId, timeline.first().runId)
+        assertEquals(planId, timeline.first().planId)
+    }
+
+    @Test
     fun schemaIncludesBackupRecordUniqueIndex() {
         val query = SimpleSQLiteQuery("PRAGMA index_list('backup_records')")
         val cursor = database.query(query)

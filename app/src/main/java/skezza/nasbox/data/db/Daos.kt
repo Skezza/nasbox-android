@@ -63,8 +63,26 @@ interface RunDao {
     @Query("SELECT * FROM runs WHERE plan_id = :planId ORDER BY started_at_epoch_ms DESC")
     fun observeForPlan(planId: Long): Flow<List<RunEntity>>
 
+    @Query("SELECT * FROM runs ORDER BY started_at_epoch_ms DESC LIMIT 1")
+    fun observeLatest(): Flow<RunEntity?>
+
+    @Query("SELECT * FROM runs ORDER BY started_at_epoch_ms DESC LIMIT :limit")
+    fun observeLatestRuns(limit: Int): Flow<List<RunEntity>>
+
     @Query("SELECT * FROM runs ORDER BY started_at_epoch_ms DESC LIMIT :limit")
     suspend fun getLatest(limit: Int): List<RunEntity>
+
+    @Query("SELECT * FROM runs WHERE status = :status ORDER BY started_at_epoch_ms DESC")
+    fun observeByStatus(status: String): Flow<List<RunEntity>>
+
+    @Query("SELECT * FROM runs WHERE status = :status ORDER BY started_at_epoch_ms DESC")
+    suspend fun getByStatus(status: String): List<RunEntity>
+
+    @Query("SELECT * FROM runs WHERE run_id = :runId LIMIT 1")
+    fun observeById(runId: Long): Flow<RunEntity?>
+
+    @Query("SELECT * FROM runs WHERE run_id = :runId LIMIT 1")
+    suspend fun getById(runId: Long): RunEntity?
 }
 
 @Dao
@@ -74,4 +92,25 @@ interface RunLogDao {
 
     @Query("SELECT * FROM run_logs WHERE run_id = :runId ORDER BY timestamp_epoch_ms ASC")
     suspend fun getForRun(runId: Long): List<RunLogEntity>
+
+    @Query("SELECT * FROM run_logs WHERE run_id = :runId ORDER BY timestamp_epoch_ms DESC LIMIT :limit")
+    fun observeForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>>
+
+    @Query(
+        """
+        SELECT
+            rl.log_id,
+            rl.run_id,
+            r.plan_id,
+            rl.timestamp_epoch_ms,
+            rl.severity,
+            rl.message,
+            rl.detail
+        FROM run_logs rl
+        INNER JOIN runs r ON r.run_id = rl.run_id
+        ORDER BY rl.timestamp_epoch_ms DESC
+        LIMIT :limit
+        """,
+    )
+    fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>>
 }

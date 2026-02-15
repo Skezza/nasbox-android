@@ -13,8 +13,10 @@ NASBox is an Android app for archiving shared-storage to local SMB shares (SMB2/
 - ✅ Phase 4 complete: MediaStore album integration, runtime photo permission flow, and full plan management are implemented.
 - ✨ Plans now support **Photo Album** and **General Folder** source types, optional video inclusion for album plans, optional album templating, and a full-phone backup preset for shared storage.
 - ✅ Phase 5 complete: core sync engine is implemented with run records, item-level continue-on-error handling, SMB uploads, and backup-proof persistence.
+- ✅ Phase 5.5 complete: Folder and Full-Device plans now execute end-to-end with archive-only semantics and backup-proof dedupe.
 - ✅ Phase 5.5.1 complete: share discovery now uses SMBJ RPC (`IPC$` + SRVSVC `NetShareEnum`) first, then falls back to SMBJ `listShares` when RPC returns no data.
-- ⏳ Next: Phase 5.5 source-execution expansion for Folder and Full-Device plans, followed by Phase 6 dashboard mission control.
+- ✅ Phase 6 complete: Dashboard mission control is implemented with health status, primary run/test actions, live run strip, and persisted timeline events.
+- ⏳ Next: Phase 7 UX hardening and resilience.
 
 See:
 - `project_plan.md` for phase-by-phase roadmap
@@ -23,10 +25,13 @@ See:
 
 ## Project structure (current)
 
-- `app/src/main/java/skezza/nasbox/ui/**` — Compose navigation with Dashboard, Plans, and Vault feature screens
+- `app/src/main/java/skezza/nasbox/ui/dashboard/**` — Dashboard mission-control screen + view model
+- `app/src/main/java/skezza/nasbox/ui/plans/**` — Plan list/editor, source-mode setup, and manual run entry points
+- `app/src/main/java/skezza/nasbox/ui/vault/**` — Vault list/editor, connection test, discovery, and browse assist
+- `app/src/main/java/skezza/nasbox/ui/navigation/**` — top-level routing and bottom navigation wiring
 - `app/src/main/java/skezza/nasbox/data/db/**` — Room entities, DAOs, database class, provider
 - `app/src/main/java/skezza/nasbox/data/repository/**` — repository interfaces and Room-backed implementations
-- `app/src/test/java/**` — baseline persistence tests
+- `app/src/test/java/**` — unit tests for run engine, SMB/domain logic, dashboard/vault view models, and DAO constraints
 
 ## SMB connection prerequisites
 
@@ -40,14 +45,16 @@ Vault also provides a **Discover servers** action that scans the current Wi-Fi s
 - Share enumeration within **Browse destination** now runs two SMB2/3-compatible paths: first SRVSVC `NetShareEnum` over SMBJ RPC (`IPC$`), then SMBJ `listShares` when RPC yields no data.
 
 
-## Manual run behavior (Phase 5)
+## Manual run behavior (Phase 5/5.5/6)
 
 - Plans list exposes a **Run now** action for immediate manual execution.
 - Each run persists `runs` counters (scanned/uploaded/skipped/failed), terminal status (`SUCCESS`/`PARTIAL`/`FAILED`), and summary error when present.
 - Re-running a plan skips previously uploaded media using backup-proof records keyed by `(plan_id, media_item_id)`.
 - Upload path generation applies token rendering and SMB-safe segment sanitization before directory creation and stream upload.
 - When album templating is disabled, album runs preserve source-style naming by uploading to `<basePath>/<albumName>/<originalFilename>` (no date-based template folders).
-- Current implementation supports album-backed plans for execution; folder/full-device plans report unsupported-source failure until later phases.
+- Folder plans execute from SAF-tree/file-path sources and preserve relative source subfolders in remote path rendering.
+- Full-device plans scan shared-storage roots (`DCIM`, `Pictures`, `Movies`, `Download`, `Documents`, `Music`) and continue on inaccessible-root failures.
+- Dashboard now surfaces latest run summary, live `RUNNING` progress counters, and recent persisted run-log timeline entries.
 
 ## Plans and media prerequisites
 
@@ -67,8 +74,14 @@ From repository root:
 ./gradlew test
 ```
 
+Focused checks for recently completed phases:
+
+```bash
+./gradlew testDebugUnitTest --tests "skezza.nasbox.domain.sync.RunPlanBackupUseCaseTest" --tests "skezza.nasbox.ui.dashboard.DashboardViewModelTest"
+```
+
 Known limitation:
-- Some JVM unit tests currently depend on Android framework APIs (for example `android.util.Log` and Room Android wiring), so `:app:testDebugUnitTest` can fail locally without Robolectric/instrumentation coverage.
+- Some JVM tests still rely on Android runtime/Looper or Room Android wiring, so full `:app:testDebugUnitTest` can fail locally without Robolectric/instrumentation support.
 
 ## Testing direction (MVP)
 

@@ -9,6 +9,7 @@ import skezza.nasbox.data.db.RunDao
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogDao
 import skezza.nasbox.data.db.RunLogEntity
+import skezza.nasbox.data.db.RunTimelineLogRow
 import skezza.nasbox.data.db.ServerDao
 import skezza.nasbox.data.db.ServerEntity
 
@@ -74,8 +75,14 @@ class DefaultBackupRecordRepository(
 
 interface RunRepository {
     fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>>
+    fun observeLatestRun(): Flow<RunEntity?>
+    fun observeLatestRuns(limit: Int): Flow<List<RunEntity>>
+    fun observeRunsByStatus(status: String): Flow<List<RunEntity>>
+    fun observeRun(runId: Long): Flow<RunEntity?>
     suspend fun createRun(run: RunEntity): Long
     suspend fun updateRun(run: RunEntity)
+    suspend fun getRun(runId: Long): RunEntity?
+    suspend fun runsByStatus(status: String): List<RunEntity>
     suspend fun latestRuns(limit: Int): List<RunEntity>
 }
 
@@ -84,9 +91,21 @@ class DefaultRunRepository(
 ) : RunRepository {
     override fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>> = runDao.observeForPlan(planId)
 
+    override fun observeLatestRun(): Flow<RunEntity?> = runDao.observeLatest()
+
+    override fun observeLatestRuns(limit: Int): Flow<List<RunEntity>> = runDao.observeLatestRuns(limit)
+
+    override fun observeRunsByStatus(status: String): Flow<List<RunEntity>> = runDao.observeByStatus(status)
+
+    override fun observeRun(runId: Long): Flow<RunEntity?> = runDao.observeById(runId)
+
     override suspend fun createRun(run: RunEntity): Long = runDao.insert(run)
 
     override suspend fun updateRun(run: RunEntity) = runDao.update(run)
+
+    override suspend fun getRun(runId: Long): RunEntity? = runDao.getById(runId)
+
+    override suspend fun runsByStatus(status: String): List<RunEntity> = runDao.getByStatus(status)
 
     override suspend fun latestRuns(limit: Int): List<RunEntity> = runDao.getLatest(limit)
 }
@@ -94,6 +113,8 @@ class DefaultRunRepository(
 interface RunLogRepository {
     suspend fun createLog(log: RunLogEntity): Long
     suspend fun logsForRun(runId: Long): List<RunLogEntity>
+    fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>>
+    fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>>
 }
 
 class DefaultRunLogRepository(
@@ -102,4 +123,9 @@ class DefaultRunLogRepository(
     override suspend fun createLog(log: RunLogEntity): Long = runLogDao.insert(log)
 
     override suspend fun logsForRun(runId: Long): List<RunLogEntity> = runLogDao.getForRun(runId)
+
+    override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> =
+        runLogDao.observeForRunNewest(runId, limit)
+
+    override fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>> = runLogDao.observeLatestTimeline(limit)
 }

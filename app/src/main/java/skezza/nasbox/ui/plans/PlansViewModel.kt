@@ -22,13 +22,28 @@ import skezza.nasbox.domain.plan.PlanInput
 import skezza.nasbox.domain.plan.PlanSourceType
 import skezza.nasbox.domain.plan.PlanValidationResult
 import skezza.nasbox.domain.plan.ValidatePlanInputUseCase
-import skezza.nasbox.domain.sync.RunPlanBackupUseCase
+import skezza.nasbox.domain.schedule.PLAN_DEFAULT_DAY_OF_MONTH
+import skezza.nasbox.domain.schedule.PLAN_DEFAULT_INTERVAL_HOURS
+import skezza.nasbox.domain.schedule.PLAN_DEFAULT_SCHEDULE_MINUTES
+import skezza.nasbox.domain.schedule.PLAN_WEEKLY_ALL_DAYS_MASK
+import skezza.nasbox.domain.schedule.PlanScheduleCoordinator
+import skezza.nasbox.domain.schedule.PlanScheduleFrequency
+import skezza.nasbox.domain.schedule.PlanScheduleWeekday
+import skezza.nasbox.domain.schedule.formatPlanScheduleSummary
+import skezza.nasbox.domain.schedule.normalizeDayOfMonth
+import skezza.nasbox.domain.schedule.normalizeIntervalHours
+import skezza.nasbox.domain.schedule.normalizeScheduleMinutes
+import skezza.nasbox.domain.schedule.normalizeWeeklyDaysMask
+import skezza.nasbox.domain.schedule.weeklyMaskFor
+import skezza.nasbox.domain.sync.EnqueuePlanRunUseCase
+import skezza.nasbox.domain.sync.RunTriggerSource
 
 class PlansViewModel(
     private val planRepository: PlanRepository,
     private val serverRepository: ServerRepository,
     private val listMediaAlbumsUseCase: ListMediaAlbumsUseCase,
-    private val runPlanBackupUseCase: RunPlanBackupUseCase,
+    private val enqueuePlanRunUseCase: EnqueuePlanRunUseCase,
+    private val planScheduleCoordinator: PlanScheduleCoordinator,
     private val validatePlanInputUseCase: ValidatePlanInputUseCase = ValidatePlanInputUseCase(),
 ) : ViewModel() {
 
@@ -56,12 +71,16 @@ class PlansViewModel(
     ) { plans, servers ->
         plans.map { plan ->
             val serverName = servers.firstOrNull { it.serverId == plan.serverId }?.name ?: "Unknown server"
-            val sourceType = parseSourceType(plan.sourceType)
+            val sourceType = parsePlanSourceType(plan.sourceType)
             val sourceSummary = when (sourceType) {
                 PlanSourceType.ALBUM -> "Album (${plan.sourceAlbum})${if (plan.includeVideos) " + videos" else ""}"
                 PlanSourceType.FOLDER -> "Folder (${plan.folderPath.ifBlank { "not set" }})"
                 PlanSourceType.FULL_DEVICE -> "Full device backup (shared storage)"
             }
+            val scheduleFrequency = PlanScheduleFrequency.fromRaw(plan.scheduleFrequency)
+            val scheduleDaysMask = normalizeWeeklyDaysMask(plan.scheduleDaysMask)
+            val scheduleDayOfMonth = normalizeDayOfMonth(plan.scheduleDayOfMonth)
+            val scheduleIntervalHours = normalizeIntervalHours(plan.scheduleIntervalHours)
             PlanListItemUiState(
                 planId = plan.planId,
                 name = plan.name,
@@ -73,6 +92,20 @@ class PlansViewModel(
                 useAlbumTemplating = plan.useAlbumTemplating,
                 template = plan.directoryTemplate,
                 filenamePattern = plan.filenamePattern,
+                scheduleEnabled = plan.scheduleEnabled,
+                scheduleTimeMinutes = normalizeScheduleMinutes(plan.scheduleTimeMinutes),
+                scheduleFrequency = scheduleFrequency,
+                scheduleDaysMask = scheduleDaysMask,
+                scheduleDayOfMonth = scheduleDayOfMonth,
+                scheduleIntervalHours = scheduleIntervalHours,
+                scheduleSummary = formatPlanScheduleSummary(
+                    enabled = plan.scheduleEnabled,
+                    frequency = scheduleFrequency,
+                    scheduleTimeMinutes = plan.scheduleTimeMinutes,
+                    scheduleDaysMask = scheduleDaysMask,
+                    scheduleDayOfMonth = scheduleDayOfMonth,
+                    scheduleIntervalHours = scheduleIntervalHours,
+                ),
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -126,21 +159,9 @@ class PlansViewModel(
             runCatching {
                 planRepository.getPlan(planId) ?: throw IllegalStateException("Plan not found")
             }.onSuccess { plan ->
-                _editorState.value = PlanEditorUiState(
-                    editingPlanId = plan.planId,
-                    name = plan.name,
-                    enabled = plan.enabled,
-                    sourceType = parseSourceType(plan.sourceType),
-                    selectedAlbumId = plan.sourceAlbum.ifBlank { null },
-                    folderPath = plan.folderPath,
-                    selectedServerId = plan.serverId,
-                    includeVideos = plan.includeVideos,
-                    useAlbumTemplating = plan.useAlbumTemplating,
-                    directoryTemplate = plan.directoryTemplate,
-                    filenamePattern = plan.filenamePattern,
-                )
+                _editorState.value = editorStateFromPlanEntity(plan)
             }.onFailure {
-                _message.value = "Unable to load the selected plan."
+                _message.value = "Unable to load the selected job."
             }
         }
     }
@@ -155,6 +176,74 @@ class PlansViewModel(
     fun updateEditorUseAlbumTemplating(value: Boolean) { _editorState.value = _editorState.value.copy(useAlbumTemplating = value) }
     fun updateEditorDirectoryTemplate(value: String) { _editorState.value = _editorState.value.copy(directoryTemplate = value) }
     fun updateEditorFilenamePattern(value: String) { _editorState.value = _editorState.value.copy(filenamePattern = value) }
+    fun updateEditorScheduleEnabled(value: Boolean) { _editorState.value = _editorState.value.copy(scheduleEnabled = value) }
+    fun updateEditorScheduleTimeMinutes(value: Int) {
+        _editorState.value = _editorState.value.copy(scheduleTimeMinutes = normalizeScheduleMinutes(value))
+    }
+
+    fun updateEditorScheduleFrequency(value: PlanScheduleFrequency) {
+        val state = _editorState.value
+        _editorState.value = state.copy(
+            scheduleFrequency = value,
+            scheduleDaysMask = if (value == PlanScheduleFrequency.WEEKLY) {
+                normalizeWeeklyDaysMask(state.scheduleDaysMask)
+            } else {
+                state.scheduleDaysMask
+            },
+        )
+    }
+
+    fun toggleEditorScheduleWeekday(weekday: PlanScheduleWeekday) {
+        val state = _editorState.value
+        val toggledMask = state.scheduleDaysMask xor weekday.bitMask
+        if (toggledMask == 0) return
+        _editorState.value = state.copy(scheduleDaysMask = normalizeWeeklyDaysMask(toggledMask))
+    }
+
+    fun updateEditorScheduleDayOfMonth(value: Int) {
+        _editorState.value = _editorState.value.copy(scheduleDayOfMonth = normalizeDayOfMonth(value))
+    }
+
+    fun updateEditorScheduleIntervalHours(value: Int) {
+        _editorState.value = _editorState.value.copy(scheduleIntervalHours = normalizeIntervalHours(value))
+    }
+
+    fun applySchedulePreset(preset: PlanSchedulePreset) {
+        val state = _editorState.value
+        _editorState.value = when (preset) {
+            PlanSchedulePreset.NIGHTLY -> state.copy(
+                scheduleEnabled = true,
+                scheduleFrequency = PlanScheduleFrequency.DAILY,
+                scheduleTimeMinutes = 2 * 60,
+            )
+            PlanSchedulePreset.WORKDAYS -> state.copy(
+                scheduleEnabled = true,
+                scheduleFrequency = PlanScheduleFrequency.WEEKLY,
+                scheduleDaysMask = weeklyMaskFor(
+                    PlanScheduleWeekday.MONDAY,
+                    PlanScheduleWeekday.TUESDAY,
+                    PlanScheduleWeekday.WEDNESDAY,
+                    PlanScheduleWeekday.THURSDAY,
+                    PlanScheduleWeekday.FRIDAY,
+                ),
+                scheduleTimeMinutes = 21 * 60,
+            )
+            PlanSchedulePreset.WEEKEND -> state.copy(
+                scheduleEnabled = true,
+                scheduleFrequency = PlanScheduleFrequency.WEEKLY,
+                scheduleDaysMask = weeklyMaskFor(
+                    PlanScheduleWeekday.SATURDAY,
+                    PlanScheduleWeekday.SUNDAY,
+                ),
+                scheduleTimeMinutes = 9 * 60,
+            )
+            PlanSchedulePreset.EVERY_6_HOURS -> state.copy(
+                scheduleEnabled = true,
+                scheduleFrequency = PlanScheduleFrequency.INTERVAL_HOURS,
+                scheduleIntervalHours = 6,
+            )
+        }
+    }
 
     fun savePlan(onSuccess: () -> Unit) {
         viewModelScope.launch {
@@ -177,44 +266,33 @@ class PlansViewModel(
                 return@launch
             }
 
-            val isAlbum = state.sourceType == PlanSourceType.ALBUM
-            val isFolder = state.sourceType == PlanSourceType.FOLDER
-            val entity = PlanEntity(
-                planId = state.editingPlanId ?: 0,
-                name = state.name.trim(),
-                sourceAlbum = if (isAlbum) state.selectedAlbumId.orEmpty() else "",
-                sourceType = state.sourceType.name,
-                folderPath = when {
-                    isFolder -> state.folderPath.trim()
-                    state.sourceType == PlanSourceType.FULL_DEVICE -> FULL_DEVICE_PRESET
-                    else -> ""
-                },
-                includeVideos = isAlbum && state.includeVideos,
-                useAlbumTemplating = isAlbum && state.useAlbumTemplating,
-                serverId = requireNotNull(state.selectedServerId),
-                directoryTemplate = if (isAlbum && state.useAlbumTemplating) state.directoryTemplate.trim() else "",
-                filenamePattern = if (isAlbum && state.useAlbumTemplating) state.filenamePattern.trim() else "",
-                enabled = state.enabled,
-            )
+            val entity = planEntityFromEditorState(state)
 
             runCatching {
-                if (state.editingPlanId == null) planRepository.createPlan(entity) else planRepository.updatePlan(entity)
+                val saved = if (state.editingPlanId == null) {
+                    val newId = planRepository.createPlan(entity)
+                    entity.copy(planId = newId)
+                } else {
+                    planRepository.updatePlan(entity)
+                    entity
+                }
+                planScheduleCoordinator.synchronizePlan(saved)
             }.onSuccess {
                 onSuccess()
             }.onFailure {
-                _message.value = "Unable to save plan. Plan names must be unique."
+                _message.value = "Unable to save job. Job names must be unique."
             }
         }
     }
 
-
     fun runPlanNow(planId: Long) {
         viewModelScope.launch {
             _activeRunPlanIds.value = _activeRunPlanIds.value + planId
-            runCatching { runPlanBackupUseCase(planId) }
-                .onSuccess { result ->
-                    val base = "Run ${result.status.lowercase()} · uploaded ${result.uploadedCount}, skipped ${result.skippedCount}, failed ${result.failedCount}"
-                    _message.value = result.summaryError?.let { "$base. $it" } ?: base
+            runCatching {
+                enqueuePlanRunUseCase(planId, RunTriggerSource.MANUAL)
+            }
+                .onSuccess {
+                    _message.value = "Run queued."
                 }
                 .onFailure { error ->
                     val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName.orEmpty()
@@ -226,8 +304,11 @@ class PlansViewModel(
 
     fun deletePlan(planId: Long) {
         viewModelScope.launch {
-            runCatching { planRepository.deletePlan(planId) }
-                .onFailure { _message.value = "Unable to delete plan." }
+            runCatching {
+                planScheduleCoordinator.cancelPlan(planId)
+                planRepository.deletePlan(planId)
+            }
+                .onFailure { _message.value = "Unable to delete job." }
         }
     }
 
@@ -247,22 +328,24 @@ class PlansViewModel(
         )
     }
 
-    private fun parseSourceType(value: String): PlanSourceType =
-        PlanSourceType.entries.firstOrNull { it.name == value } ?: PlanSourceType.ALBUM
-
     companion object {
-        private const val FULL_DEVICE_PRESET = "FULL_DEVICE_SHARED_STORAGE"
-
         fun factory(
             planRepository: PlanRepository,
             serverRepository: ServerRepository,
             listMediaAlbumsUseCase: ListMediaAlbumsUseCase,
-            runPlanBackupUseCase: RunPlanBackupUseCase,
+            enqueuePlanRunUseCase: EnqueuePlanRunUseCase,
+            planScheduleCoordinator: PlanScheduleCoordinator,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(PlansViewModel::class.java)) {
                     @Suppress("UNCHECKED_CAST")
-                    return PlansViewModel(planRepository, serverRepository, listMediaAlbumsUseCase, runPlanBackupUseCase) as T
+                    return PlansViewModel(
+                        planRepository,
+                        serverRepository,
+                        listMediaAlbumsUseCase,
+                        enqueuePlanRunUseCase,
+                        planScheduleCoordinator,
+                    ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }
@@ -270,6 +353,13 @@ class PlansViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T = create(modelClass)
         }
     }
+}
+
+enum class PlanSchedulePreset {
+    NIGHTLY,
+    WORKDAYS,
+    WEEKEND,
+    EVERY_6_HOURS,
 }
 
 data class PlanListItemUiState(
@@ -283,6 +373,13 @@ data class PlanListItemUiState(
     val useAlbumTemplating: Boolean,
     val template: String,
     val filenamePattern: String,
+    val scheduleEnabled: Boolean,
+    val scheduleTimeMinutes: Int,
+    val scheduleFrequency: PlanScheduleFrequency,
+    val scheduleDaysMask: Int,
+    val scheduleDayOfMonth: Int,
+    val scheduleIntervalHours: Int,
+    val scheduleSummary: String,
 )
 
 data class PlanServerOption(
@@ -303,5 +400,66 @@ data class PlanEditorUiState(
     val useAlbumTemplating: Boolean = false,
     val directoryTemplate: String = "",
     val filenamePattern: String = "",
+    val scheduleEnabled: Boolean = false,
+    val scheduleTimeMinutes: Int = PLAN_DEFAULT_SCHEDULE_MINUTES,
+    val scheduleFrequency: PlanScheduleFrequency = PlanScheduleFrequency.DAILY,
+    val scheduleDaysMask: Int = PLAN_WEEKLY_ALL_DAYS_MASK,
+    val scheduleDayOfMonth: Int = PLAN_DEFAULT_DAY_OF_MONTH,
+    val scheduleIntervalHours: Int = PLAN_DEFAULT_INTERVAL_HOURS,
     val validation: PlanValidationResult = PlanValidationResult(),
 )
+
+internal fun parsePlanSourceType(value: String): PlanSourceType =
+    PlanSourceType.entries.firstOrNull { it.name == value } ?: PlanSourceType.ALBUM
+
+internal fun editorStateFromPlanEntity(plan: PlanEntity): PlanEditorUiState {
+    return PlanEditorUiState(
+        editingPlanId = plan.planId,
+        name = plan.name,
+        enabled = plan.enabled,
+        sourceType = parsePlanSourceType(plan.sourceType),
+        selectedAlbumId = plan.sourceAlbum.ifBlank { null },
+        folderPath = plan.folderPath,
+        selectedServerId = plan.serverId,
+        includeVideos = plan.includeVideos,
+        useAlbumTemplating = plan.useAlbumTemplating,
+        directoryTemplate = plan.directoryTemplate,
+        filenamePattern = plan.filenamePattern,
+        scheduleEnabled = plan.scheduleEnabled,
+        scheduleTimeMinutes = normalizeScheduleMinutes(plan.scheduleTimeMinutes),
+        scheduleFrequency = PlanScheduleFrequency.fromRaw(plan.scheduleFrequency),
+        scheduleDaysMask = normalizeWeeklyDaysMask(plan.scheduleDaysMask),
+        scheduleDayOfMonth = normalizeDayOfMonth(plan.scheduleDayOfMonth),
+        scheduleIntervalHours = normalizeIntervalHours(plan.scheduleIntervalHours),
+    )
+}
+
+internal fun planEntityFromEditorState(state: PlanEditorUiState): PlanEntity {
+    val isAlbum = state.sourceType == PlanSourceType.ALBUM
+    val isFolder = state.sourceType == PlanSourceType.FOLDER
+    return PlanEntity(
+        planId = state.editingPlanId ?: 0,
+        name = state.name.trim(),
+        sourceAlbum = if (isAlbum) state.selectedAlbumId.orEmpty() else "",
+        sourceType = state.sourceType.name,
+        folderPath = when {
+            isFolder -> state.folderPath.trim()
+            state.sourceType == PlanSourceType.FULL_DEVICE -> FULL_DEVICE_PRESET
+            else -> ""
+        },
+        includeVideos = isAlbum && state.includeVideos,
+        useAlbumTemplating = isAlbum && state.useAlbumTemplating,
+        serverId = requireNotNull(state.selectedServerId),
+        directoryTemplate = if (isAlbum && state.useAlbumTemplating) state.directoryTemplate.trim() else "",
+        filenamePattern = if (isAlbum && state.useAlbumTemplating) state.filenamePattern.trim() else "",
+        enabled = state.enabled,
+        scheduleEnabled = state.scheduleEnabled,
+        scheduleTimeMinutes = normalizeScheduleMinutes(state.scheduleTimeMinutes),
+        scheduleFrequency = state.scheduleFrequency.name,
+        scheduleDaysMask = normalizeWeeklyDaysMask(state.scheduleDaysMask),
+        scheduleDayOfMonth = normalizeDayOfMonth(state.scheduleDayOfMonth),
+        scheduleIntervalHours = normalizeIntervalHours(state.scheduleIntervalHours),
+    )
+}
+
+private const val FULL_DEVICE_PRESET = "FULL_DEVICE_SHARED_STORAGE"

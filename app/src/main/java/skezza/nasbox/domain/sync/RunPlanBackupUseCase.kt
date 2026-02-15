@@ -34,15 +34,27 @@ class RunPlanBackupUseCase(
     private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
 ) {
 
-    suspend operator fun invoke(planId: Long): RunExecutionResult = withContext(Dispatchers.IO) {
+    suspend operator fun invoke(
+        planId: Long,
+        triggerSource: String = RunTriggerSource.MANUAL,
+    ): RunExecutionResult = withContext(Dispatchers.IO) {
         val startedAt = nowEpochMs()
+        val normalizedTriggerSource = normalizeTriggerSource(triggerSource)
         val runId = runRepository.createRun(
             RunEntity(
                 planId = planId,
-                status = STATUS_RUNNING,
+                status = RunStatus.RUNNING,
                 startedAtEpochMs = startedAt,
+                heartbeatAtEpochMs = startedAt,
+                triggerSource = normalizedTriggerSource,
             ),
         )
+
+        var scannedCount = 0
+        var uploadedCount = 0
+        var skippedCount = 0
+        var failedCount = 0
+        var summaryError: String? = null
 
         suspend fun log(severity: String, message: String, detail: String? = null) {
             val formatted = "[runId=$runId planId=$planId] $message"
@@ -62,6 +74,40 @@ class RunPlanBackupUseCase(
             )
         }
 
+        suspend fun persistRunningSnapshot() {
+            val heartbeatAt = nowEpochMs()
+            runRepository.updateRun(
+                RunEntity(
+                    runId = runId,
+                    planId = planId,
+                    status = RunStatus.RUNNING,
+                    startedAtEpochMs = startedAt,
+                    finishedAtEpochMs = null,
+                    heartbeatAtEpochMs = heartbeatAt,
+                    scannedCount = scannedCount,
+                    uploadedCount = uploadedCount,
+                    skippedCount = skippedCount,
+                    failedCount = failedCount,
+                    summaryError = summaryError,
+                    triggerSource = normalizedTriggerSource,
+                ),
+            )
+        }
+
+        suspend fun emitProgress(force: Boolean = false) {
+            val processedCount = uploadedCount + skippedCount + failedCount
+            if (!force && processedCount % PROGRESS_LOG_INTERVAL != 0 && processedCount != scannedCount) {
+                return
+            }
+            val processedForDisplay = if (scannedCount > 0) minOf(scannedCount, processedCount) else processedCount
+            val progressSuffix = if (scannedCount > 0) "$processedForDisplay/$scannedCount" else processedCount.toString()
+            log(
+                SEVERITY_INFO,
+                "Run progress",
+                "processed=$progressSuffix uploaded=$uploadedCount skipped=$skippedCount failed=$failedCount",
+            )
+        }
+
         log(SEVERITY_INFO, "Run started")
 
         val plan = planRepository.getPlan(planId)
@@ -76,7 +122,8 @@ class RunPlanBackupUseCase(
                 skipped = 0,
                 failed = 1,
                 summaryError = "Plan no longer exists.",
-                status = STATUS_FAILED,
+                status = RunStatus.FAILED,
+                triggerSource = normalizedTriggerSource,
                 log = ::log,
             )
         }
@@ -92,7 +139,8 @@ class RunPlanBackupUseCase(
                 skipped = 0,
                 failed = 1,
                 summaryError = "Plan is disabled.",
-                status = STATUS_FAILED,
+                status = RunStatus.FAILED,
+                triggerSource = normalizedTriggerSource,
                 log = ::log,
             )
         }
@@ -109,7 +157,8 @@ class RunPlanBackupUseCase(
                 skipped = 0,
                 failed = 1,
                 summaryError = "Unsupported source mode: ${plan.sourceType}.",
-                status = STATUS_FAILED,
+                status = RunStatus.FAILED,
+                triggerSource = normalizedTriggerSource,
                 log = ::log,
             )
         }
@@ -126,7 +175,8 @@ class RunPlanBackupUseCase(
                 skipped = 0,
                 failed = 1,
                 summaryError = "Destination server not found.",
-                status = STATUS_FAILED,
+                status = RunStatus.FAILED,
+                triggerSource = normalizedTriggerSource,
                 log = ::log,
             )
         }
@@ -143,7 +193,8 @@ class RunPlanBackupUseCase(
                 skipped = 0,
                 failed = 1,
                 summaryError = "Server credentials unavailable. Re-save this server.",
-                status = STATUS_FAILED,
+                status = RunStatus.FAILED,
+                triggerSource = normalizedTriggerSource,
                 log = ::log,
             )
         }
@@ -186,7 +237,8 @@ class RunPlanBackupUseCase(
                         skipped = 0,
                         failed = 1,
                         summaryError = message,
-                        status = STATUS_FAILED,
+                        status = RunStatus.FAILED,
+                        triggerSource = normalizedTriggerSource,
                         log = ::log,
                     )
                 }
@@ -205,7 +257,8 @@ class RunPlanBackupUseCase(
                         skipped = 0,
                         failed = 1,
                         summaryError = message,
-                        status = STATUS_FAILED,
+                        status = RunStatus.FAILED,
+                        triggerSource = normalizedTriggerSource,
                         log = ::log,
                     )
                 }
@@ -227,7 +280,8 @@ class RunPlanBackupUseCase(
                         skipped = 0,
                         failed = 1,
                         summaryError = message,
-                        status = STATUS_FAILED,
+                        status = RunStatus.FAILED,
+                        triggerSource = normalizedTriggerSource,
                         log = ::log,
                     )
                 }
@@ -253,7 +307,8 @@ class RunPlanBackupUseCase(
                         skipped = 0,
                         failed = 1,
                         summaryError = message,
-                        status = STATUS_FAILED,
+                        status = RunStatus.FAILED,
+                        triggerSource = normalizedTriggerSource,
                         log = ::log,
                     )
                 }
@@ -262,10 +317,7 @@ class RunPlanBackupUseCase(
             else -> error("Unexpected source type: $sourceType")
         }
 
-        var uploadedCount = 0
-        var skippedCount = 0
-        var failedCount = 0
-        var summaryError: String? = null
+        scannedCount = scanResult.items.size
 
         scanResult.warnings.forEach { warning ->
             failedCount += 1
@@ -278,12 +330,15 @@ class RunPlanBackupUseCase(
             "Scan complete",
             "source=$sourceType discovered=${scanResult.items.size} warnings=${scanResult.warnings.size}",
         )
+        persistRunningSnapshot()
+        emitProgress(force = true)
 
         for (item in scanResult.items) {
             val record = backupRecordRepository.findByPlanAndMediaItem(planId, item.mediaId)
             if (record != null) {
                 skippedCount += 1
-                log(SEVERITY_INFO, "Skipped previously uploaded item", "mediaItemId=${item.mediaId}")
+                persistRunningSnapshot()
+                emitProgress()
                 continue
             }
 
@@ -309,6 +364,8 @@ class RunPlanBackupUseCase(
                 val message = "Unable to read source item ${item.mediaId}."
                 summaryError = summaryError ?: message
                 log(SEVERITY_ERROR, message)
+                persistRunningSnapshot()
+                emitProgress()
                 continue
             }
 
@@ -336,7 +393,6 @@ class RunPlanBackupUseCase(
                 }
                 if (recordResult.isSuccess) {
                     uploadedCount += 1
-                    log(SEVERITY_INFO, "Uploaded item", "mediaItemId=${item.mediaId} remotePath=$remotePath")
                 } else {
                     failedCount += 1
                     val recordError = recordResult.exceptionOrNull()
@@ -352,24 +408,27 @@ class RunPlanBackupUseCase(
                 summaryError = summaryError ?: message
                 log(SEVERITY_ERROR, message, throwable.toLogDetail())
             }
+            persistRunningSnapshot()
+            emitProgress()
         }
 
         val finalStatus = when {
-            failedCount > 0 && uploadedCount == 0 && skippedCount == 0 -> STATUS_FAILED
-            failedCount > 0 -> STATUS_PARTIAL
-            else -> STATUS_SUCCESS
+            failedCount > 0 && uploadedCount == 0 && skippedCount == 0 -> RunStatus.FAILED
+            failedCount > 0 -> RunStatus.PARTIAL
+            else -> RunStatus.SUCCESS
         }
 
         finalizeRun(
             runId = runId,
             planId = planId,
             startedAt = startedAt,
-            scanned = scanResult.items.size,
+            scanned = scannedCount,
             uploaded = uploadedCount,
             skipped = skippedCount,
             failed = failedCount,
             summaryError = summaryError,
             status = finalStatus,
+            triggerSource = normalizedTriggerSource,
             log = ::log,
         )
     }
@@ -384,6 +443,7 @@ class RunPlanBackupUseCase(
         failed: Int,
         summaryError: String?,
         status: String,
+        triggerSource: String,
         log: suspend (String, String, String?) -> Unit,
     ): RunExecutionResult {
         val finishedAt = nowEpochMs()
@@ -394,11 +454,13 @@ class RunPlanBackupUseCase(
                 status = status,
                 startedAtEpochMs = startedAt,
                 finishedAtEpochMs = finishedAt,
+                heartbeatAtEpochMs = finishedAt,
                 scannedCount = scanned,
                 uploadedCount = uploaded,
                 skippedCount = skipped,
                 failedCount = failed,
                 summaryError = summaryError,
+                triggerSource = triggerSource,
             ),
         )
         log(SEVERITY_INFO, "Run finished", "status=$status uploaded=$uploaded skipped=$skipped failed=$failed")
@@ -427,16 +489,21 @@ class RunPlanBackupUseCase(
         val warnings: List<String> = emptyList(),
     )
 
+    private fun normalizeTriggerSource(source: String): String {
+        val normalized = source.trim().uppercase(Locale.US)
+        return when (normalized) {
+            RunTriggerSource.SCHEDULED -> RunTriggerSource.SCHEDULED
+            else -> RunTriggerSource.MANUAL
+        }
+    }
+
     companion object {
-        private const val STATUS_RUNNING = "RUNNING"
-        private const val STATUS_SUCCESS = "SUCCESS"
-        private const val STATUS_PARTIAL = "PARTIAL"
-        private const val STATUS_FAILED = "FAILED"
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
         private const val SOURCE_TYPE_FOLDER = "FOLDER"
         private const val SOURCE_TYPE_FULL_DEVICE = "FULL_DEVICE"
         private const val SEVERITY_INFO = "INFO"
         private const val SEVERITY_ERROR = "ERROR"
+        private const val PROGRESS_LOG_INTERVAL = 10
         private const val LOG_TAG = "NasBoxRun"
     }
 }

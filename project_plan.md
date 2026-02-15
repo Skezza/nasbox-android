@@ -12,6 +12,8 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 - 🧭 Phase 4.5 — Guided SMB destination browse assist: **Proposed**.
 - ✅ Phase 5 — Core sync engine (manual-run, archive-only): **Completed**.
 - ✅ Phase 5.5 — Source expansion execution (folder + full-device): **Completed**.
+- ✅ Phase 5.5.1 — Share discovery fallback: **Completed**.
+- ✅ Phase 6 — Dashboard mission control: **Completed**.
 - Keep each phase mergeable and testable.
 - Prefer vertical slices over broad incomplete scaffolding.
 - Validate phase exit criteria before advancing.
@@ -284,6 +286,16 @@ This plan sequences delivery into reviewable phases while keeping the app functi
 ### Exit criteria
 - User can start runs from dashboard and monitor progress.
 - Timeline and run summary update correctly after completion.
+
+### Implementation status
+- ✅ Completed: Dashboard route now renders a dedicated mission-control screen backed by `DashboardViewModel` instead of a placeholder.
+- ✅ Completed: dashboard status card now summarizes vault health (fresh-success vs failed vs stale/untested tests) and latest run counters/status with summary error context.
+- ✅ Completed: dashboard primary actions now support **Run now** for selected plans and **Test connection** for selected servers with in-flight action guards and snackbar feedback.
+- ✅ Completed: live run strip now appears when latest run status is `RUNNING`, using persisted run counters from incremental run updates.
+- ✅ Completed: recent timeline section now reads persisted run-log entries (cross-run, most-recent first) and maps them to plan names.
+- ✅ Completed: prerequisite CTAs now guide users to Vault/Plans when servers or plans are missing.
+- ✅ Completed: `RunPlanBackupUseCase` now persists running snapshots and emits explicit progress events so dashboard observability updates during active runs.
+- ✅ Completed: focused unit tests cover dashboard view-model behavior and run progress snapshot/event emission.
 
 ---
 

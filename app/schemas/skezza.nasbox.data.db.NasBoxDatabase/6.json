@@ -1,0 +1,510 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 6,
+    "identityHash": "f6dfd317092fd8910fd74c99b5446995",
+    "entities": [
+      {
+        "tableName": "servers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`server_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `host` TEXT NOT NULL, `shareName` TEXT NOT NULL, `basePath` TEXT NOT NULL, `domain` TEXT NOT NULL, `username` TEXT NOT NULL, `credentialAlias` TEXT NOT NULL, `lastTestStatus` TEXT, `lastTestTimestampEpochMs` INTEGER, `lastTestLatencyMs` INTEGER, `lastTestErrorCategory` TEXT, `lastTestErrorMessage` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "serverId",
+            "columnName": "server_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "host",
+            "columnName": "host",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shareName",
+            "columnName": "shareName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "basePath",
+            "columnName": "basePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "domain",
+            "columnName": "domain",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "credentialAlias",
+            "columnName": "credentialAlias",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastTestStatus",
+            "columnName": "lastTestStatus",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastTestTimestampEpochMs",
+            "columnName": "lastTestTimestampEpochMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastTestLatencyMs",
+            "columnName": "lastTestLatencyMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastTestErrorCategory",
+            "columnName": "lastTestErrorCategory",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastTestErrorMessage",
+            "columnName": "lastTestErrorMessage",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "server_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_servers_name",
+            "unique": true,
+            "columnNames": [
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_servers_name` ON `${TABLE_NAME}` (`name`)"
+          }
+        ]
+      },
+      {
+        "tableName": "plans",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`plan_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `source_album` TEXT NOT NULL, `source_type` TEXT NOT NULL, `folder_path` TEXT NOT NULL, `include_videos` INTEGER NOT NULL, `use_album_templating` INTEGER NOT NULL, `server_id` INTEGER NOT NULL, `directory_template` TEXT NOT NULL, `filename_pattern` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `schedule_enabled` INTEGER NOT NULL, `schedule_time_minutes` INTEGER NOT NULL, `schedule_frequency` TEXT NOT NULL, `schedule_days_mask` INTEGER NOT NULL, `schedule_day_of_month` INTEGER NOT NULL, `schedule_interval_hours` INTEGER NOT NULL, FOREIGN KEY(`server_id`) REFERENCES `servers`(`server_id`) ON UPDATE CASCADE ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "planId",
+            "columnName": "plan_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAlbum",
+            "columnName": "source_album",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "folderPath",
+            "columnName": "folder_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "includeVideos",
+            "columnName": "include_videos",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "useAlbumTemplating",
+            "columnName": "use_album_templating",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverId",
+            "columnName": "server_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "directoryTemplate",
+            "columnName": "directory_template",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filenamePattern",
+            "columnName": "filename_pattern",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleEnabled",
+            "columnName": "schedule_enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleTimeMinutes",
+            "columnName": "schedule_time_minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleFrequency",
+            "columnName": "schedule_frequency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleDaysMask",
+            "columnName": "schedule_days_mask",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleDayOfMonth",
+            "columnName": "schedule_day_of_month",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleIntervalHours",
+            "columnName": "schedule_interval_hours",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "plan_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_plans_server_id",
+            "unique": false,
+            "columnNames": [
+              "server_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_plans_server_id` ON `${TABLE_NAME}` (`server_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "servers",
+            "onDelete": "RESTRICT",
+            "onUpdate": "CASCADE",
+            "columns": [
+              "server_id"
+            ],
+            "referencedColumns": [
+              "server_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "backup_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`record_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `plan_id` INTEGER NOT NULL, `media_item_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `uploaded_at_epoch_ms` INTEGER NOT NULL, FOREIGN KEY(`plan_id`) REFERENCES `plans`(`plan_id`) ON UPDATE CASCADE ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "record_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "planId",
+            "columnName": "plan_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mediaItemId",
+            "columnName": "media_item_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remotePath",
+            "columnName": "remote_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadedAtEpochMs",
+            "columnName": "uploaded_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "record_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_backup_records_plan_id_media_item_id",
+            "unique": true,
+            "columnNames": [
+              "plan_id",
+              "media_item_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_backup_records_plan_id_media_item_id` ON `${TABLE_NAME}` (`plan_id`, `media_item_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plans",
+            "onDelete": "CASCADE",
+            "onUpdate": "CASCADE",
+            "columns": [
+              "plan_id"
+            ],
+            "referencedColumns": [
+              "plan_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "runs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`run_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `plan_id` INTEGER NOT NULL, `status` TEXT NOT NULL, `started_at_epoch_ms` INTEGER NOT NULL, `finished_at_epoch_ms` INTEGER, `heartbeat_at_epoch_ms` INTEGER NOT NULL, `scanned_count` INTEGER NOT NULL, `uploaded_count` INTEGER NOT NULL, `skipped_count` INTEGER NOT NULL, `failed_count` INTEGER NOT NULL, `summary_error` TEXT, `trigger_source` TEXT NOT NULL, FOREIGN KEY(`plan_id`) REFERENCES `plans`(`plan_id`) ON UPDATE CASCADE ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "runId",
+            "columnName": "run_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "planId",
+            "columnName": "plan_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMs",
+            "columnName": "started_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAtEpochMs",
+            "columnName": "finished_at_epoch_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "heartbeatAtEpochMs",
+            "columnName": "heartbeat_at_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scannedCount",
+            "columnName": "scanned_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadedCount",
+            "columnName": "uploaded_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "skippedCount",
+            "columnName": "skipped_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failedCount",
+            "columnName": "failed_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "summaryError",
+            "columnName": "summary_error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "triggerSource",
+            "columnName": "trigger_source",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "run_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_runs_plan_id",
+            "unique": false,
+            "columnNames": [
+              "plan_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_runs_plan_id` ON `${TABLE_NAME}` (`plan_id`)"
+          },
+          {
+            "name": "index_runs_started_at_epoch_ms",
+            "unique": false,
+            "columnNames": [
+              "started_at_epoch_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_runs_started_at_epoch_ms` ON `${TABLE_NAME}` (`started_at_epoch_ms`)"
+          },
+          {
+            "name": "index_runs_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_runs_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "plans",
+            "onDelete": "CASCADE",
+            "onUpdate": "CASCADE",
+            "columns": [
+              "plan_id"
+            ],
+            "referencedColumns": [
+              "plan_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "run_logs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`log_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `run_id` INTEGER NOT NULL, `timestamp_epoch_ms` INTEGER NOT NULL, `severity` TEXT NOT NULL, `message` TEXT NOT NULL, `detail` TEXT, FOREIGN KEY(`run_id`) REFERENCES `runs`(`run_id`) ON UPDATE CASCADE ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "logId",
+            "columnName": "log_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "run_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestampEpochMs",
+            "columnName": "timestamp_epoch_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "severity",
+            "columnName": "severity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "message",
+            "columnName": "message",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "log_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_run_logs_run_id_timestamp_epoch_ms",
+            "unique": false,
+            "columnNames": [
+              "run_id",
+              "timestamp_epoch_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_run_logs_run_id_timestamp_epoch_ms` ON `${TABLE_NAME}` (`run_id`, `timestamp_epoch_ms`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "runs",
+            "onDelete": "CASCADE",
+            "onUpdate": "CASCADE",
+            "columns": [
+              "run_id"
+            ],
+            "referencedColumns": [
+              "run_id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f6dfd317092fd8910fd74c99b5446995')"
+    ]
+  }
+}

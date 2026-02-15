@@ -67,6 +67,18 @@ data class PlanEntity(
     @ColumnInfo(name = "filename_pattern")
     val filenamePattern: String,
     val enabled: Boolean,
+    @ColumnInfo(name = "schedule_enabled")
+    val scheduleEnabled: Boolean = false,
+    @ColumnInfo(name = "schedule_time_minutes")
+    val scheduleTimeMinutes: Int = 120,
+    @ColumnInfo(name = "schedule_frequency")
+    val scheduleFrequency: String = "DAILY",
+    @ColumnInfo(name = "schedule_days_mask")
+    val scheduleDaysMask: Int = 127,
+    @ColumnInfo(name = "schedule_day_of_month")
+    val scheduleDayOfMonth: Int = 1,
+    @ColumnInfo(name = "schedule_interval_hours")
+    val scheduleIntervalHours: Int = 24,
 )
 
 @Entity(
@@ -112,6 +124,7 @@ data class BackupRecordEntity(
     indices = [
         Index(value = ["plan_id"]),
         Index(value = ["started_at_epoch_ms"]),
+        Index(value = ["status"]),
     ],
 )
 data class RunEntity(
@@ -125,6 +138,8 @@ data class RunEntity(
     val startedAtEpochMs: Long,
     @ColumnInfo(name = "finished_at_epoch_ms")
     val finishedAtEpochMs: Long? = null,
+    @ColumnInfo(name = "heartbeat_at_epoch_ms")
+    val heartbeatAtEpochMs: Long = startedAtEpochMs,
     @ColumnInfo(name = "scanned_count")
     val scannedCount: Int = 0,
     @ColumnInfo(name = "uploaded_count")
@@ -135,6 +150,8 @@ data class RunEntity(
     val failedCount: Int = 0,
     @ColumnInfo(name = "summary_error")
     val summaryError: String? = null,
+    @ColumnInfo(name = "trigger_source")
+    val triggerSource: String = "MANUAL",
 )
 
 @Entity(
@@ -158,6 +175,20 @@ data class RunLogEntity(
     val logId: Long = 0,
     @ColumnInfo(name = "run_id")
     val runId: Long,
+    @ColumnInfo(name = "timestamp_epoch_ms")
+    val timestampEpochMs: Long,
+    val severity: String,
+    val message: String,
+    val detail: String? = null,
+)
+
+data class RunTimelineLogRow(
+    @ColumnInfo(name = "log_id")
+    val logId: Long,
+    @ColumnInfo(name = "run_id")
+    val runId: Long,
+    @ColumnInfo(name = "plan_id")
+    val planId: Long,
     @ColumnInfo(name = "timestamp_epoch_ms")
     val timestampEpochMs: Long,
     val severity: String,

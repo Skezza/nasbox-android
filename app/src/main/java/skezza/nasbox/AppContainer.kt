@@ -1,6 +1,7 @@
 package skezza.nasbox
 
 import android.content.Context
+import androidx.work.WorkManager
 import skezza.nasbox.data.db.DatabaseProvider
 import skezza.nasbox.data.discovery.AndroidSmbServerDiscoveryScanner
 import skezza.nasbox.data.discovery.SmbServerDiscoveryScanner
@@ -16,20 +17,25 @@ import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
 import skezza.nasbox.data.repository.ServerRepository
+import skezza.nasbox.data.schedule.WorkManagerPlanScheduleCoordinator
 import skezza.nasbox.data.security.AndroidKeystoreCredentialStore
 import skezza.nasbox.data.security.CredentialStore
 import skezza.nasbox.data.smb.SmbClient
 import skezza.nasbox.data.smb.SmbShareRpcEnumerator
 import skezza.nasbox.data.smb.SmbjClient
 import skezza.nasbox.data.smb.SmbjRpcShareEnumerator
+import skezza.nasbox.domain.schedule.PlanScheduleCoordinator
 import skezza.nasbox.domain.discovery.DiscoverSmbServersUseCase
 import skezza.nasbox.domain.media.ListMediaAlbumsUseCase
 import skezza.nasbox.domain.smb.BrowseSmbDestinationUseCase
 import skezza.nasbox.domain.smb.TestSmbConnectionUseCase
+import skezza.nasbox.domain.sync.EnqueuePlanRunUseCase
+import skezza.nasbox.domain.sync.MarkRunInterruptedUseCase
 import skezza.nasbox.domain.sync.RunPlanBackupUseCase
 
 class AppContainer(context: Context) {
     private val database = DatabaseProvider.get(context)
+    private val workManager: WorkManager = WorkManager.getInstance(context)
 
     val serverRepository: ServerRepository = DefaultServerRepository(database.serverDao())
     val planRepository: PlanRepository = DefaultPlanRepository(database.planDao())
@@ -71,4 +77,20 @@ class AppContainer(context: Context) {
         mediaStoreDataSource = mediaStoreDataSource,
         smbClient = smbClient,
     )
+
+    val enqueuePlanRunUseCase: EnqueuePlanRunUseCase = EnqueuePlanRunUseCase(workManager)
+
+    val markRunInterruptedUseCase: MarkRunInterruptedUseCase = MarkRunInterruptedUseCase(
+        runRepository = runRepository,
+        runLogRepository = runLogRepository,
+    )
+
+    val planScheduleCoordinator: PlanScheduleCoordinator = WorkManagerPlanScheduleCoordinator(
+        workManager = workManager,
+        planRepository = planRepository,
+    )
+
+    suspend fun reconcileSchedulesOnStartup() {
+        planScheduleCoordinator.reconcileSchedules()
+    }
 }

@@ -5,7 +5,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -28,7 +27,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import skezza.nasbox.AppContainer
-import skezza.nasbox.ui.screens.EditorPlaceholderScreen
+import skezza.nasbox.ui.audit.AuditRunDetailScreen
+import skezza.nasbox.ui.audit.AuditScreen
+import skezza.nasbox.ui.audit.AuditViewModel
+import skezza.nasbox.ui.dashboard.DashboardScreen
+import skezza.nasbox.ui.dashboard.DashboardViewModel
 import skezza.nasbox.ui.plans.PlanEditorScreen
 import skezza.nasbox.ui.plans.PlansScreen
 import skezza.nasbox.ui.plans.PlansViewModel
@@ -41,7 +44,8 @@ private const val ROUTE_PLANS = "plans"
 private const val ROUTE_VAULT = "vault"
 private const val ROUTE_SERVER_EDITOR = "serverEditor"
 private const val ROUTE_PLAN_EDITOR = "planEditor"
-private const val ROUTE_RUN_DETAIL = "runDetail"
+private const val ROUTE_AUDIT = "audit"
+private const val ROUTE_AUDIT_RUN = "auditRun"
 
 private enum class TopLevelDestination(
     val route: String,
@@ -49,7 +53,7 @@ private enum class TopLevelDestination(
     val icon: ImageVector,
 ) {
     DASHBOARD(route = ROUTE_DASHBOARD, label = "Dashboard", icon = Icons.Default.Dashboard),
-    PLANS(route = ROUTE_PLANS, label = "Plans", icon = Icons.Default.Folder),
+    PLANS(route = ROUTE_PLANS, label = "Jobs", icon = Icons.Default.Folder),
     VAULT(route = ROUTE_VAULT, label = "Vault", icon = Icons.Default.Lock),
 }
 
@@ -74,7 +78,22 @@ fun NasBoxApp(
             planRepository = appContainer.planRepository,
             serverRepository = appContainer.serverRepository,
             listMediaAlbumsUseCase = appContainer.listMediaAlbumsUseCase,
-            runPlanBackupUseCase = appContainer.runPlanBackupUseCase,
+            enqueuePlanRunUseCase = appContainer.enqueuePlanRunUseCase,
+            planScheduleCoordinator = appContainer.planScheduleCoordinator,
+        ),
+    )
+    val dashboardViewModel: DashboardViewModel = viewModel(
+        factory = DashboardViewModel.factory(
+            planRepository = appContainer.planRepository,
+            serverRepository = appContainer.serverRepository,
+            runRepository = appContainer.runRepository,
+        ),
+    )
+    val auditViewModel: AuditViewModel = viewModel(
+        factory = AuditViewModel.factory(
+            planRepository = appContainer.planRepository,
+            runRepository = appContainer.runRepository,
+            runLogRepository = appContainer.runLogRepository,
         ),
     )
 
@@ -110,15 +129,10 @@ fun NasBoxApp(
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(ROUTE_DASHBOARD) {
-                skezza.nasbox.ui.screens.RootPlaceholderScreen(
-                    title = "Dashboard",
-                    description = "Mission control placeholder. Run summaries and health indicators will be added in later phases.",
-                    primaryActionLabel = "Run detail",
-                    primaryActionIcon = Icons.Default.PlayArrow,
-                    onPrimaryAction = { navController.navigate(ROUTE_RUN_DETAIL) },
-                    secondaryActionLabel = "Open Plans",
-                    secondaryActionIcon = Icons.Default.Folder,
-                    onSecondaryAction = { navController.navigate(ROUTE_PLANS) },
+                DashboardScreen(
+                    viewModel = dashboardViewModel,
+                    onOpenAudit = { navController.navigate(ROUTE_AUDIT) },
+                    onOpenRunAudit = { runId -> navController.navigate("$ROUTE_AUDIT_RUN/$runId") },
                 )
             }
             composable(ROUTE_PLANS) {
@@ -170,11 +184,22 @@ fun NasBoxApp(
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
-            composable(ROUTE_RUN_DETAIL) {
-                EditorPlaceholderScreen(
-                    title = "Run Detail",
-                    description = "Optional run detail route is wired for future run metrics and diagnostic logs.",
-                    onNavigateBack = { navController.popBackStack() },
+            composable(ROUTE_AUDIT) {
+                AuditScreen(
+                    viewModel = auditViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenRun = { runId -> navController.navigate("$ROUTE_AUDIT_RUN/$runId") },
+                )
+            }
+            composable(
+                route = "$ROUTE_AUDIT_RUN/{runId}",
+                arguments = listOf(navArgument("runId") { type = NavType.LongType }),
+            ) { backStackEntry ->
+                val runId = backStackEntry.arguments?.getLong("runId") ?: 0L
+                AuditRunDetailScreen(
+                    viewModel = auditViewModel,
+                    runId = runId,
+                    onBack = { navController.popBackStack() },
                 )
             }
         }
