@@ -24,6 +24,9 @@ class MarkRunInterruptedUseCase(
                 finishedAtEpochMs = now,
                 heartbeatAtEpochMs = now,
                 summaryError = summary,
+                phase = RunPhase.TERMINAL,
+                continuationCursor = null,
+                lastProgressAtEpochMs = maxOf(run.lastProgressAtEpochMs, now),
             ),
         )
         runLogRepository.createLog(

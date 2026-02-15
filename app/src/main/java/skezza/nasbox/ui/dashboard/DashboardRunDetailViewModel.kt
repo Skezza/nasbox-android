@@ -14,6 +14,7 @@ import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
+import skezza.nasbox.domain.sync.RunPhase
 import skezza.nasbox.domain.sync.RunStatus
 
 class DashboardRunDetailViewModel(
@@ -32,7 +33,11 @@ class DashboardRunDetailViewModel(
             plans.firstOrNull { it.planId == current.planId }?.name
         } ?: run?.let { "Plan #${it.planId}" }
         val mappedRun = run?.toSummary(planName.orEmpty())
-        val isActive = run?.status?.trim()?.uppercase(Locale.US) in ACTIVE_STATUSES
+        val isActive = run?.phase
+            ?.trim()
+            ?.uppercase(Locale.US)
+            ?.let { phase -> phase != RunPhase.TERMINAL }
+            ?: false
         val logsAscending = logsNewest.sortedBy { it.timestampEpochMs }
         val fileActivities = buildFileActivities(logsAscending)
         val currentFile = if (isActive) {
@@ -61,6 +66,8 @@ class DashboardRunDetailViewModel(
         planName = planName,
         status = status,
         triggerSource = triggerSource,
+        executionMode = executionMode,
+        phase = phase,
         startedAtEpochMs = startedAtEpochMs,
         finishedAtEpochMs = finishedAtEpochMs,
         scannedCount = scannedCount,
@@ -100,6 +107,8 @@ class DashboardRunDetailViewModel(
                     milestones += DashboardRunDetailMilestone("Interrupted", log.timestampEpochMs)
                 MESSAGE_FINALIZED_CANCELED ->
                     milestones += DashboardRunDetailMilestone("Recovered as canceled", log.timestampEpochMs)
+                MESSAGE_CHUNK_PAUSED ->
+                    milestones += DashboardRunDetailMilestone("Chunk paused for system window", log.timestampEpochMs)
                 MESSAGE_FINISHED -> {
                     val finishedLabel = statusLabelFromRunFinishedDetail(log.detail)
                     milestones += DashboardRunDetailMilestone(finishedLabel, log.timestampEpochMs)
@@ -112,6 +121,11 @@ class DashboardRunDetailViewModel(
                             reachedProgress += checkpoint
                             milestones += DashboardRunDetailMilestone("$checkpoint% processed", log.timestampEpochMs)
                         }
+                    }
+                }
+                else -> {
+                    if (log.message.startsWith(MESSAGE_RESUMED_ATTEMPT_PREFIX)) {
+                        milestones += DashboardRunDetailMilestone(log.message, log.timestampEpochMs)
                     }
                 }
             }
@@ -373,7 +387,6 @@ class DashboardRunDetailViewModel(
 
     companion object {
         private const val RUN_LOG_LIMIT = 300
-        private val ACTIVE_STATUSES = setOf(RunStatus.RUNNING, RunStatus.CANCEL_REQUESTED)
         private val NOISY_MESSAGES = setOf("Run progress")
 
         private const val MESSAGE_PROCESSING_ITEM = "Processing item"
@@ -385,6 +398,8 @@ class DashboardRunDetailViewModel(
         private const val MESSAGE_CANCELLATION_ACKNOWLEDGED = "Run cancellation acknowledged"
         private const val MESSAGE_INTERRUPTED = "Run marked as interrupted"
         private const val MESSAGE_FINALIZED_CANCELED = "Run finalized as canceled"
+        private const val MESSAGE_CHUNK_PAUSED = "Chunk paused for system window"
+        private const val MESSAGE_RESUMED_ATTEMPT_PREFIX = "Resumed attempt #"
         private const val MESSAGE_FINISHED = "Run finished"
 
         fun factory(
@@ -426,6 +441,8 @@ data class DashboardRunDetailSummary(
     val planName: String,
     val status: String,
     val triggerSource: String,
+    val executionMode: String,
+    val phase: String,
     val startedAtEpochMs: Long,
     val finishedAtEpochMs: Long?,
     val scannedCount: Int,

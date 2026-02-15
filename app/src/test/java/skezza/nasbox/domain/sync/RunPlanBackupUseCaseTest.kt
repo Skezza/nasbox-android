@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import skezza.nasbox.data.db.BackupRecordEntity
@@ -110,6 +111,65 @@ class RunPlanBackupUseCaseTest {
         assertTrue(runningSnapshots.any { it.scannedCount == media.size })
         assertTrue(runningSnapshots.any { it.skippedCount > 0 || it.uploadedCount > 0 || it.failedCount > 0 })
         assertEquals("SUCCESS", runRepo.updatedRuns.last().status)
+    }
+
+    @Test
+    fun invoke_backgroundContinuation_resumesWithSingleLogicalRun() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val media = (1..85).map { index ->
+            MediaImageItem(
+                mediaId = index.toString(),
+                bucketId = "album-1",
+                displayName = "img_$index.jpg",
+                mimeType = "image/jpeg",
+                dateTakenEpochMs = 1_700_000_000_000 + index,
+                sizeBytes = 4,
+            )
+        }
+
+        val runRepo = FakeRunRepository()
+        val smbClient = FakeSmbClient()
+        val useCase = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = runRepo,
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(albumItems = media),
+            smbClient = smbClient,
+        )
+
+        val firstAttempt = useCase(
+            planId = plan.planId,
+            triggerSource = RunTriggerSource.SCHEDULED,
+            executionMode = RunExecutionMode.BACKGROUND,
+        )
+        assertTrue(firstAttempt.pausedForContinuation)
+        assertEquals(RunPhase.WAITING_RETRY, firstAttempt.phase)
+        assertEquals(RunStatus.RUNNING, firstAttempt.status)
+        assertNotNull(firstAttempt.continuationCursor)
+        assertEquals(80, firstAttempt.uploadedCount)
+
+        val secondAttempt = useCase(
+            planId = plan.planId,
+            triggerSource = RunTriggerSource.SCHEDULED,
+            runId = firstAttempt.runId,
+            executionMode = RunExecutionMode.BACKGROUND,
+            continuationCursor = firstAttempt.continuationCursor,
+        )
+        assertEquals(firstAttempt.runId, secondAttempt.runId)
+        assertEquals(RunStatus.SUCCESS, secondAttempt.status)
+        assertEquals(RunPhase.TERMINAL, secondAttempt.phase)
+        assertEquals(85, secondAttempt.uploadedCount)
+        assertEquals(85, smbClient.uploadedPaths.size)
     }
 
     @Test

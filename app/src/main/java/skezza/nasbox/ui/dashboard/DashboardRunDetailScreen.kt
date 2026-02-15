@@ -34,6 +34,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import skezza.nasbox.domain.sync.RunExecutionMode
+import skezza.nasbox.domain.sync.RunPhase
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,7 +122,7 @@ private fun StorySummaryCard(
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Text(
-                "${run.planName} - ${runStatusLabel(run.status)} (${run.triggerSource.lowercase()})",
+                "${run.planName} - ${runPhaseLabel(run)} (${modeBadge(run.triggerSource, run.executionMode)})",
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -162,8 +164,13 @@ private fun StorySummaryCard(
                 }
             }
             if (isActive) {
+                val waitingLabel = if (run.phase.uppercase(Locale.US) == RunPhase.WAITING_RETRY) {
+                    "Waiting for system background window..."
+                } else {
+                    "Current file: ${currentFileLabel ?: "Waiting for next file..."}"
+                }
                 Text(
-                    "Current file: ${currentFileLabel ?: "Waiting for next file..."}",
+                    waitingLabel,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -349,6 +356,26 @@ private fun TechnicalLogCard(
 
 private fun formatTimestamp(epochMs: Long): String =
     SimpleDateFormat("MMM d, HH:mm:ss", Locale.US).format(Date(epochMs))
+
+private fun runPhaseLabel(run: DashboardRunDetailSummary): String {
+    val phase = run.phase.uppercase(Locale.US)
+    val mode = run.executionMode.uppercase(Locale.US)
+    return when (phase) {
+        RunPhase.WAITING_RETRY -> "Waiting for background window"
+        RunPhase.FINISHING -> "Finishing"
+        RunPhase.RUNNING -> if (mode == RunExecutionMode.BACKGROUND) {
+            "Running (background)"
+        } else {
+            "Running (manual foreground)"
+        }
+        else -> runStatusLabel(run.status)
+    }
+}
+
+private fun modeBadge(
+    triggerSource: String,
+    executionMode: String,
+): String = "${triggerSource.lowercase(Locale.US)}/${executionMode.lowercase(Locale.US)}"
 
 private const val DEFAULT_VISIBLE_UPLOADED = 5
 private const val MAX_RAW_LOG_ROWS = 120

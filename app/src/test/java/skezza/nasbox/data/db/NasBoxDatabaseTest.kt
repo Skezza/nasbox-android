@@ -170,6 +170,9 @@ class NasBoxDatabaseTest {
         assertEquals(runId, latestRuns.first().runId)
         assertEquals(1, logs.size)
         assertNotNull(logs.first().message)
+        assertEquals("FOREGROUND", latestRuns.first().executionMode)
+        assertEquals("RUNNING", latestRuns.first().phase)
+        assertEquals(100L, latestRuns.first().lastProgressAtEpochMs)
     }
 
     @Test

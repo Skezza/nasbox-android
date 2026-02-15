@@ -31,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import skezza.nasbox.domain.sync.RunExecutionMode
+import skezza.nasbox.domain.sync.RunPhase
 import skezza.nasbox.domain.sync.RunStatus
 import skezza.nasbox.ui.common.ErrorHint
 import skezza.nasbox.ui.common.LoadState
@@ -251,9 +253,14 @@ private fun CurrentRunsCard(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            "${run.planName} - ${statusLabel(run.status)} (${run.triggerSource.lowercase()})",
+                            "${run.planName} - ${currentPhaseLabel(run)}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            modeBadge(run.triggerSource, run.executionMode),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (progress == null) {
                             LinearProgressIndicator(
@@ -318,7 +325,7 @@ private fun RecentRunsCard(
                 runs.forEach { run ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            "${run.planName} - ${statusLabel(run.status)} (${run.triggerSource.lowercase()})",
+                            "${run.planName} - ${statusLabel(run.status)} (${modeBadge(run.triggerSource, run.executionMode)})",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -363,6 +370,30 @@ private fun statusLabel(status: String): String = when (status.uppercase(Locale.
     RunStatus.CANCELED -> "Canceled"
     RunStatus.INTERRUPTED -> "Interrupted"
     else -> status
+}
+
+private fun currentPhaseLabel(run: DashboardCurrentRun): String {
+    val phase = run.phase.uppercase(Locale.US)
+    val executionMode = run.executionMode.uppercase(Locale.US)
+    return when (phase) {
+        RunPhase.WAITING_RETRY -> "Waiting for background window"
+        RunPhase.FINISHING -> "Finishing"
+        RunPhase.RUNNING -> {
+            if (executionMode == RunExecutionMode.BACKGROUND) {
+                "Running (background)"
+            } else {
+                "Running (manual foreground)"
+            }
+        }
+        else -> statusLabel(run.status)
+    }
+}
+
+private fun modeBadge(
+    triggerSource: String,
+    executionMode: String,
+): String {
+    return "${triggerSource.lowercase(Locale.US)}/${executionMode.lowercase(Locale.US)}"
 }
 
 private fun formatTimestamp(epochMs: Long): String =

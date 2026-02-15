@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +69,7 @@ private val topLevelDestinationRoutes = TopLevelDestination.entries.map { it.rou
 @Composable
 fun NasBoxApp(
     appContainer: AppContainer,
+    openRunId: Long? = null,
     navController: NavHostController = rememberNavController(),
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -114,6 +116,12 @@ fun NasBoxApp(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { innerPadding ->
+        LaunchedEffect(openRunId) {
+            val runId = openRunId ?: return@LaunchedEffect
+            if (runId > 0L) {
+                navController.navigate("$ROUTE_DASHBOARD_RUN/$runId")
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()

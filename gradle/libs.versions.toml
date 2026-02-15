@@ -15,7 +15,7 @@ smbj = "0.14.0"
 jmdns = "3.5.8"
 dcerpc = "0.12.13"
 documentfile = "1.0.1"
-work = "2.10.0"
+work = "2.10.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

@@ -37,7 +37,6 @@ import skezza.nasbox.domain.sync.MarkRunInterruptedUseCase
 import skezza.nasbox.domain.sync.ReconcileStaleActiveRunsUseCase
 import skezza.nasbox.domain.sync.RunPlanBackupUseCase
 import skezza.nasbox.domain.sync.StopRunUseCase
-import skezza.nasbox.work.RunPlanWorker
 
 class AppContainer(context: Context) {
     private val database = DatabaseProvider.get(context)
@@ -114,11 +113,10 @@ class AppContainer(context: Context) {
         val hasActiveQueueWorker = runCatching {
             withContext(Dispatchers.IO) {
                 workManager
-                    .getWorkInfosForUniqueWork(EnqueuePlanRunUseCase.UNIQUE_RUN_QUEUE)
+                    .getWorkInfosByTag(EnqueuePlanRunUseCase.TAG_RUN_WORK)
                     .get()
             }.any { workInfo ->
-                workInfo.tags.contains(RunPlanWorker::class.java.name) &&
-                    workInfo.state in ACTIVE_WORK_STATES
+                workInfo.state in ACTIVE_WORK_STATES
             }
         }.getOrDefault(false)
         reconcileStaleActiveRunsUseCase(forceFinalizeActive = !hasActiveQueueWorker)

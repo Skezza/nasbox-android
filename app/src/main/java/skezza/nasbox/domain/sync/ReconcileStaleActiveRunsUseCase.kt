@@ -25,6 +25,10 @@ class ReconcileStaleActiveRunsUseCase(
 
         candidates.forEach { run ->
             if (run.finishedAtEpochMs != null) return@forEach
+            val normalizedPhase = run.phase.trim().uppercase(Locale.US)
+            if (!forceFinalizeActive && normalizedPhase == RunPhase.WAITING_RETRY) {
+                return@forEach
+            }
 
             val isLatestRunForPlan = latestActiveRunPerPlan.add(run.planId)
             when (run.status.trim().uppercase(Locale.US)) {
@@ -39,6 +43,9 @@ class ReconcileStaleActiveRunsUseCase(
                             finishedAtEpochMs = now,
                             heartbeatAtEpochMs = now,
                             summaryError = run.summaryError ?: DEFAULT_CANCELED_SUMMARY,
+                            phase = RunPhase.TERMINAL,
+                            continuationCursor = null,
+                            lastProgressAtEpochMs = maxOf(run.lastProgressAtEpochMs, now),
                         ),
                     )
                     runLogRepository.createLog(
@@ -64,6 +71,9 @@ class ReconcileStaleActiveRunsUseCase(
                             finishedAtEpochMs = now,
                             heartbeatAtEpochMs = now,
                             summaryError = run.summaryError ?: DEFAULT_INTERRUPTED_SUMMARY,
+                            phase = RunPhase.TERMINAL,
+                            continuationCursor = null,
+                            lastProgressAtEpochMs = maxOf(run.lastProgressAtEpochMs, now),
                         ),
                     )
                     runLogRepository.createLog(

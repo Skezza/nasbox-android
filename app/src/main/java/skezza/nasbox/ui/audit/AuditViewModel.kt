@@ -33,8 +33,9 @@ class AuditViewModel(
     val listUiState: StateFlow<AuditListUiState> = combine(
         planRepository.observePlans(),
         runRepository.observeLatestRuns(RUN_LIST_LIMIT),
+        runLogRepository.observeLatestTimeline(PHASE_TRANSITIONS_SCAN_LIMIT),
         selectedFilter,
-    ) { plans, runs, filter ->
+    ) { plans, runs, timelineRows, filter ->
         val planNamesById = plans.associateBy(PlanEntity::planId, PlanEntity::name)
         val mapped = runs.map { run ->
             run.toListItem(planNamesById[run.planId] ?: "Plan #${run.planId}")
@@ -54,6 +55,28 @@ class AuditViewModel(
         AuditListUiState(
             selectedFilter = filter,
             runs = filtered,
+            phaseTransitions = timelineRows
+                .asSequence()
+                .filter { row ->
+                    row.message == MESSAGE_RUN_STARTED ||
+                        row.message == MESSAGE_RUN_FINISHED ||
+                        row.message == MESSAGE_CHUNK_PAUSED ||
+                        row.message == MESSAGE_INTERRUPTED ||
+                        row.message == MESSAGE_FINALIZED_CANCELED ||
+                        row.message == MESSAGE_FOREGROUND_BLOCKED ||
+                        row.message.startsWith(MESSAGE_RESUMED_PREFIX)
+                }
+                .take(PHASE_TRANSITIONS_LIMIT)
+                .map { row ->
+                    AuditPhaseTransition(
+                        runId = row.runId,
+                        planName = planNamesById[row.planId] ?: "Plan #${row.planId}",
+                        timestampEpochMs = row.timestampEpochMs,
+                        message = row.message,
+                        detail = row.detail,
+                    )
+                }
+                .toList(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -99,6 +122,8 @@ class AuditViewModel(
         planName = planName,
         status = status,
         triggerSource = triggerSource,
+        executionMode = executionMode,
+        phase = phase,
         startedAtEpochMs = startedAtEpochMs,
         finishedAtEpochMs = finishedAtEpochMs,
         uploadedCount = uploadedCount,
@@ -112,6 +137,8 @@ class AuditViewModel(
         planName = planName,
         status = status,
         triggerSource = triggerSource,
+        executionMode = executionMode,
+        phase = phase,
         startedAtEpochMs = startedAtEpochMs,
         finishedAtEpochMs = finishedAtEpochMs,
         uploadedCount = uploadedCount,
@@ -131,6 +158,15 @@ class AuditViewModel(
     companion object {
         private const val RUN_LIST_LIMIT = 200
         private const val RUN_LOG_LIMIT = 300
+        private const val PHASE_TRANSITIONS_SCAN_LIMIT = 120
+        private const val PHASE_TRANSITIONS_LIMIT = 20
+        private const val MESSAGE_RUN_STARTED = "Run started"
+        private const val MESSAGE_RUN_FINISHED = "Run finished"
+        private const val MESSAGE_CHUNK_PAUSED = "Chunk paused for system window"
+        private const val MESSAGE_INTERRUPTED = "Run marked as interrupted"
+        private const val MESSAGE_FINALIZED_CANCELED = "Run finalized as canceled"
+        private const val MESSAGE_FOREGROUND_BLOCKED = "Foreground start blocked"
+        private const val MESSAGE_RESUMED_PREFIX = "Resumed attempt #"
 
         fun factory(
             planRepository: PlanRepository,
@@ -163,6 +199,7 @@ enum class AuditFilter {
 data class AuditListUiState(
     val selectedFilter: AuditFilter = AuditFilter.ALL,
     val runs: List<AuditRunListItem> = emptyList(),
+    val phaseTransitions: List<AuditPhaseTransition> = emptyList(),
 )
 
 data class AuditRunListItem(
@@ -170,6 +207,8 @@ data class AuditRunListItem(
     val planName: String,
     val status: String,
     val triggerSource: String,
+    val executionMode: String,
+    val phase: String,
     val startedAtEpochMs: Long,
     val finishedAtEpochMs: Long?,
     val uploadedCount: Int,
@@ -188,6 +227,8 @@ data class AuditRunSummary(
     val planName: String,
     val status: String,
     val triggerSource: String,
+    val executionMode: String,
+    val phase: String,
     val startedAtEpochMs: Long,
     val finishedAtEpochMs: Long?,
     val uploadedCount: Int,
@@ -200,6 +241,14 @@ data class AuditLogItem(
     val logId: Long,
     val timestampEpochMs: Long,
     val severity: String,
+    val message: String,
+    val detail: String?,
+)
+
+data class AuditPhaseTransition(
+    val runId: Long,
+    val planName: String,
+    val timestampEpochMs: Long,
     val message: String,
     val detail: String?,
 )

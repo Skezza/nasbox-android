@@ -55,6 +55,19 @@ object DatabaseProvider {
         }
     }
 
+    private val migration6To7 = object : Migration(6, 7) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE runs ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'FOREGROUND'")
+            database.execSQL("ALTER TABLE runs ADD COLUMN phase TEXT NOT NULL DEFAULT 'RUNNING'")
+            database.execSQL("ALTER TABLE runs ADD COLUMN continuation_cursor TEXT")
+            database.execSQL("ALTER TABLE runs ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0")
+            database.execSQL("ALTER TABLE runs ADD COLUMN last_progress_at_epoch_ms INTEGER NOT NULL DEFAULT 0")
+            database.execSQL(
+                "UPDATE runs SET last_progress_at_epoch_ms = COALESCE(heartbeat_at_epoch_ms, started_at_epoch_ms)",
+            )
+        }
+    }
+
     fun get(context: Context): NasBoxDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
@@ -67,6 +80,7 @@ object DatabaseProvider {
                 migration3To4,
                 migration4To5,
                 migration5To6,
+                migration6To7,
             )
                 .build().also { instance = it }
         }

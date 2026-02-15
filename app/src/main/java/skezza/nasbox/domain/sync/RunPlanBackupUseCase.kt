@@ -37,29 +37,48 @@ class RunPlanBackupUseCase(
     suspend operator fun invoke(
         planId: Long,
         triggerSource: String = RunTriggerSource.MANUAL,
+        runId: Long? = null,
+        executionMode: String? = null,
+        continuationCursor: String? = null,
     ): RunExecutionResult = withContext(Dispatchers.IO) {
-        val startedAt = nowEpochMs()
         val normalizedTriggerSource = normalizeTriggerSource(triggerSource)
-        finalizePriorActiveRunsForPlan(planId)
-        val runId = runRepository.createRun(
-            RunEntity(
-                planId = planId,
-                status = RunStatus.RUNNING,
-                startedAtEpochMs = startedAt,
-                heartbeatAtEpochMs = startedAt,
-                triggerSource = normalizedTriggerSource,
-            ),
-        )
+        val normalizedExecutionMode = normalizeExecutionMode(executionMode, normalizedTriggerSource)
 
-        var scannedCount = 0
-        var uploadedCount = 0
-        var skippedCount = 0
-        var failedCount = 0
-        var summaryError: String? = null
+        val existingRun = runId
+            ?.takeIf { it > 0L }
+            ?.let { persistedRunId -> runRepository.getRun(persistedRunId) }
+            ?.takeIf { it.planId == planId }
+
+        if (existingRun?.finishedAtEpochMs != null) {
+            return@withContext existingRun.toExecutionResult(pausedForContinuation = false)
+        }
+
+        val activeRun = if (existingRun == null) {
+            finalizePriorActiveRunsForPlan(planId)
+            createNewRun(
+                planId = planId,
+                triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                continuationCursor = continuationCursor,
+            )
+        } else {
+            existingRun
+        }
+
+        val runIdValue = activeRun.runId
+        val startedAt = activeRun.startedAtEpochMs
+        var scannedCount = activeRun.scannedCount
+        var uploadedCount = activeRun.uploadedCount
+        var skippedCount = activeRun.skippedCount
+        var failedCount = activeRun.failedCount
+        var summaryError: String? = activeRun.summaryError
+        var resumeCount = activeRun.resumeCount
+        var lastProgressAt = activeRun.lastProgressAtEpochMs.takeIf { it > 0L } ?: activeRun.startedAtEpochMs
+        var currentCursor = continuationCursor ?: activeRun.continuationCursor
         var cancellationLogged = false
 
         suspend fun log(severity: String, message: String, detail: String? = null) {
-            val formatted = "[runId=$runId planId=$planId] $message"
+            val formatted = "[runId=$runIdValue planId=$planId] $message"
             if (severity == SEVERITY_ERROR) {
                 Log.e(LOG_TAG, formatted + detail?.let { " | $it" }.orEmpty())
             } else {
@@ -67,7 +86,7 @@ class RunPlanBackupUseCase(
             }
             runLogRepository.createLog(
                 RunLogEntity(
-                    runId = runId,
+                    runId = runIdValue,
                     timestampEpochMs = nowEpochMs(),
                     severity = severity,
                     message = message,
@@ -76,22 +95,30 @@ class RunPlanBackupUseCase(
             )
         }
 
-        suspend fun persistRunningSnapshot() {
+        fun metric(event: String, detail: String? = null) {
+            val suffix = detail?.takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()
+            Log.i(LOG_TAG, "metric=$event runId=$runIdValue planId=$planId$suffix")
+        }
+
+        suspend fun persistSnapshot(
+            phase: String,
+            continuationCursorValue: String?,
+        ) {
             val heartbeatAt = nowEpochMs()
-            val persistedStatus = readPersistedStatus(runId)
+            val persistedStatus = readPersistedStatus(runIdValue)
             if (persistedStatus == RunStatus.CANCELED) {
                 return
             }
-            val status = if (persistedStatus == RunStatus.CANCEL_REQUESTED) {
+            val persisted = if (persistedStatus == RunStatus.CANCEL_REQUESTED) {
                 RunStatus.CANCEL_REQUESTED
             } else {
                 RunStatus.RUNNING
             }
             runRepository.updateRun(
                 RunEntity(
-                    runId = runId,
+                    runId = runIdValue,
                     planId = planId,
-                    status = status,
+                    status = persisted,
                     startedAtEpochMs = startedAt,
                     finishedAtEpochMs = null,
                     heartbeatAtEpochMs = heartbeatAt,
@@ -101,33 +128,44 @@ class RunPlanBackupUseCase(
                     failedCount = failedCount,
                     summaryError = summaryError,
                     triggerSource = normalizedTriggerSource,
+                    executionMode = normalizedExecutionMode,
+                    phase = phase,
+                    continuationCursor = continuationCursorValue,
+                    resumeCount = resumeCount,
+                    lastProgressAtEpochMs = lastProgressAt,
                 ),
             )
         }
 
-        suspend fun cancelIfRequested(): RunExecutionResult? {
-            val persistedStatus = readPersistedStatus(runId)
+        suspend fun finalizeCanceledIfRequested(): RunExecutionResult? {
+            val persistedStatus = readPersistedStatus(runIdValue)
             if (persistedStatus == RunStatus.CANCELED) {
                 if (!cancellationLogged) {
                     cancellationLogged = true
                     log(SEVERITY_INFO, "Run cancellation acknowledged")
                 }
                 return RunExecutionResult(
-                    runId = runId,
+                    runId = runIdValue,
                     status = RunStatus.CANCELED,
                     uploadedCount = uploadedCount,
                     skippedCount = skippedCount,
                     failedCount = failedCount,
                     summaryError = summaryError ?: DEFAULT_CANCELED_SUMMARY,
+                    phase = RunPhase.TERMINAL,
+                    continuationCursor = null,
+                    resumeCount = resumeCount,
+                    lastProgressAtEpochMs = lastProgressAt,
+                    pausedForContinuation = false,
                 )
             }
             if (persistedStatus != RunStatus.CANCEL_REQUESTED) return null
+
             if (!cancellationLogged) {
                 cancellationLogged = true
                 log(SEVERITY_INFO, "Run cancellation acknowledged")
             }
             return finalizeRun(
-                runId = runId,
+                runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
                 scanned = scannedCount,
@@ -137,6 +175,9 @@ class RunPlanBackupUseCase(
                 summaryError = summaryError ?: DEFAULT_CANCELED_SUMMARY,
                 status = RunStatus.CANCELED,
                 triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                resumeCount = resumeCount,
+                lastProgressAt = lastProgressAt,
                 log = ::log,
             )
         }
@@ -155,40 +196,64 @@ class RunPlanBackupUseCase(
             )
         }
 
-        log(SEVERITY_INFO, "Run started")
-        cancelIfRequested()?.let { return@withContext it }
+        val isNewLogicalRun = existingRun == null
+        if (isNewLogicalRun) {
+            log(SEVERITY_INFO, "Run started")
+            metric("run_started", "executionMode=$normalizedExecutionMode trigger=$normalizedTriggerSource")
+        } else {
+            if (normalizedExecutionMode == RunExecutionMode.BACKGROUND) {
+                resumeCount += 1
+                log(SEVERITY_INFO, "Resumed attempt #$resumeCount")
+                metric("chunk_resumed", "resumeCount=$resumeCount")
+            }
+            lastProgressAt = maxOf(lastProgressAt, nowEpochMs())
+            persistSnapshot(
+                phase = RunPhase.RUNNING,
+                continuationCursorValue = currentCursor,
+            )
+        }
+
+        finalizeCanceledIfRequested()?.let { return@withContext it }
 
         val plan = planRepository.getPlan(planId)
         if (plan == null) {
             log(SEVERITY_ERROR, "Run aborted: plan does not exist", "planId=$planId")
+            metric("run_interrupted", "reason=plan_missing")
             return@withContext finalizeRun(
-                runId = runId,
+                runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
-                scanned = 0,
-                uploaded = 0,
-                skipped = 0,
-                failed = 1,
+                scanned = scannedCount,
+                uploaded = uploadedCount,
+                skipped = skippedCount,
+                failed = failedCount + 1,
                 summaryError = "Plan no longer exists.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                resumeCount = resumeCount,
+                lastProgressAt = lastProgressAt,
                 log = ::log,
             )
         }
 
         if (!plan.enabled) {
             log(SEVERITY_ERROR, "Run aborted: plan is disabled", "planId=${plan.planId}")
+            metric("run_interrupted", "reason=plan_disabled")
             return@withContext finalizeRun(
-                runId = runId,
+                runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
-                scanned = 0,
-                uploaded = 0,
-                skipped = 0,
-                failed = 1,
+                scanned = scannedCount,
+                uploaded = uploadedCount,
+                skipped = skippedCount,
+                failed = failedCount + 1,
                 summaryError = "Plan is disabled.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                resumeCount = resumeCount,
+                lastProgressAt = lastProgressAt,
                 log = ::log,
             )
         }
@@ -196,17 +261,21 @@ class RunPlanBackupUseCase(
         val sourceType = normalizeSourceType(plan.sourceType)
         if (sourceType == null) {
             log(SEVERITY_ERROR, "Run aborted: unsupported source type", "sourceType=${plan.sourceType}")
+            metric("run_interrupted", "reason=unsupported_source")
             return@withContext finalizeRun(
-                runId = runId,
+                runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
-                scanned = 0,
-                uploaded = 0,
-                skipped = 0,
-                failed = 1,
+                scanned = scannedCount,
+                uploaded = uploadedCount,
+                skipped = skippedCount,
+                failed = failedCount + 1,
                 summaryError = "Unsupported source mode: ${plan.sourceType}.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                resumeCount = resumeCount,
+                lastProgressAt = lastProgressAt,
                 log = ::log,
             )
         }
@@ -214,35 +283,47 @@ class RunPlanBackupUseCase(
         val server = serverRepository.getServer(plan.serverId)
         if (server == null) {
             log(SEVERITY_ERROR, "Run aborted: destination server missing", "serverId=${plan.serverId}")
+            metric("run_interrupted", "reason=server_missing")
             return@withContext finalizeRun(
-                runId = runId,
+                runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
-                scanned = 0,
-                uploaded = 0,
-                skipped = 0,
-                failed = 1,
+                scanned = scannedCount,
+                uploaded = uploadedCount,
+                skipped = skippedCount,
+                failed = failedCount + 1,
                 summaryError = "Destination server not found.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                resumeCount = resumeCount,
+                lastProgressAt = lastProgressAt,
                 log = ::log,
             )
         }
 
         val password = credentialStore.loadPassword(server.credentialAlias)
         if (password == null) {
-            log(SEVERITY_ERROR, "Run aborted: credentials unavailable", "serverId=${server.serverId} alias=${server.credentialAlias}")
+            log(
+                SEVERITY_ERROR,
+                "Run aborted: credentials unavailable",
+                "serverId=${server.serverId} alias=${server.credentialAlias}",
+            )
+            metric("run_interrupted", "reason=credentials_missing")
             return@withContext finalizeRun(
-                runId = runId,
+                runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
-                scanned = 0,
-                uploaded = 0,
-                skipped = 0,
-                failed = 1,
+                scanned = scannedCount,
+                uploaded = uploadedCount,
+                skipped = skippedCount,
+                failed = failedCount + 1,
                 summaryError = "Server credentials unavailable. Re-save this server.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
+                executionMode = normalizedExecutionMode,
+                resumeCount = resumeCount,
+                lastProgressAt = lastProgressAt,
                 log = ::log,
             )
         }
@@ -253,7 +334,7 @@ class RunPlanBackupUseCase(
             username = server.username,
             password = password,
         )
-        cancelIfRequested()?.let { return@withContext it }
+        finalizeCanceledIfRequested()?.let { return@withContext it }
 
         log(
             SEVERITY_INFO,
@@ -277,17 +358,21 @@ class RunPlanBackupUseCase(
                 }.getOrElse { throwable ->
                     val message = "Unable to scan local media. Check photo permission and album availability."
                     log(SEVERITY_ERROR, message, throwable.message)
+                    metric("run_interrupted", "reason=scan_album_failed")
                     return@withContext finalizeRun(
-                        runId = runId,
+                        runId = runIdValue,
                         planId = planId,
                         startedAt = startedAt,
-                        scanned = 0,
-                        uploaded = 0,
-                        skipped = 0,
-                        failed = 1,
+                        scanned = scannedCount,
+                        uploaded = uploadedCount,
+                        skipped = skippedCount,
+                        failed = failedCount + 1,
                         summaryError = message,
                         status = RunStatus.FAILED,
                         triggerSource = normalizedTriggerSource,
+                        executionMode = normalizedExecutionMode,
+                        resumeCount = resumeCount,
+                        lastProgressAt = lastProgressAt,
                         log = ::log,
                     )
                 }
@@ -297,17 +382,21 @@ class RunPlanBackupUseCase(
                 if (plan.folderPath.isBlank()) {
                     val message = "Folder source path is missing. Re-save this plan."
                     log(SEVERITY_ERROR, "Run aborted: folder source path missing")
+                    metric("run_interrupted", "reason=folder_path_missing")
                     return@withContext finalizeRun(
-                        runId = runId,
+                        runId = runIdValue,
                         planId = planId,
                         startedAt = startedAt,
-                        scanned = 0,
-                        uploaded = 0,
-                        skipped = 0,
-                        failed = 1,
+                        scanned = scannedCount,
+                        uploaded = uploadedCount,
+                        skipped = skippedCount,
+                        failed = failedCount + 1,
                         summaryError = message,
                         status = RunStatus.FAILED,
                         triggerSource = normalizedTriggerSource,
+                        executionMode = normalizedExecutionMode,
+                        resumeCount = resumeCount,
+                        lastProgressAt = lastProgressAt,
                         log = ::log,
                     )
                 }
@@ -320,17 +409,21 @@ class RunPlanBackupUseCase(
                 }.getOrElse { throwable ->
                     val message = "Unable to scan selected folder source. Confirm access to the selected folder."
                     log(SEVERITY_ERROR, message, throwable.message)
+                    metric("run_interrupted", "reason=scan_folder_failed")
                     return@withContext finalizeRun(
-                        runId = runId,
+                        runId = runIdValue,
                         planId = planId,
                         startedAt = startedAt,
-                        scanned = 0,
-                        uploaded = 0,
-                        skipped = 0,
-                        failed = 1,
+                        scanned = scannedCount,
+                        uploaded = uploadedCount,
+                        skipped = skippedCount,
+                        failed = failedCount + 1,
                         summaryError = message,
                         status = RunStatus.FAILED,
                         triggerSource = normalizedTriggerSource,
+                        executionMode = normalizedExecutionMode,
+                        resumeCount = resumeCount,
+                        lastProgressAt = lastProgressAt,
                         log = ::log,
                     )
                 }
@@ -347,17 +440,21 @@ class RunPlanBackupUseCase(
                 }.getOrElse { throwable ->
                     val message = "Unable to scan shared storage for full-device backup."
                     log(SEVERITY_ERROR, message, throwable.message)
+                    metric("run_interrupted", "reason=scan_full_device_failed")
                     return@withContext finalizeRun(
-                        runId = runId,
+                        runId = runIdValue,
                         planId = planId,
                         startedAt = startedAt,
-                        scanned = 0,
-                        uploaded = 0,
-                        skipped = 0,
-                        failed = 1,
+                        scanned = scannedCount,
+                        uploaded = uploadedCount,
+                        skipped = skippedCount,
+                        failed = failedCount + 1,
                         summaryError = message,
                         status = RunStatus.FAILED,
                         triggerSource = normalizedTriggerSource,
+                        executionMode = normalizedExecutionMode,
+                        resumeCount = resumeCount,
+                        lastProgressAt = lastProgressAt,
                         log = ::log,
                     )
                 }
@@ -366,32 +463,101 @@ class RunPlanBackupUseCase(
             else -> error("Unexpected source type: $sourceType")
         }
 
-        scannedCount = scanResult.items.size
+        val orderedItems = scanResult.items.sortedWith(
+            compareBy<MediaImageItem> { it.relativePath.orEmpty().lowercase(Locale.US) }
+                .thenBy { it.displayName.orEmpty().lowercase(Locale.US) }
+                .thenBy { it.mediaId },
+        )
 
-        scanResult.warnings.forEach { warning ->
-            failedCount += 1
-            summaryError = summaryError ?: warning
-            log(SEVERITY_ERROR, warning)
+        scannedCount = maxOf(scannedCount, orderedItems.size)
+        val shouldApplyScanWarnings = failedCount == 0 &&
+            uploadedCount == 0 &&
+            skippedCount == 0 &&
+            currentCursor.isNullOrBlank()
+
+        if (shouldApplyScanWarnings) {
+            scanResult.warnings.forEach { warning ->
+                failedCount += 1
+                summaryError = summaryError ?: warning
+                log(SEVERITY_ERROR, warning)
+            }
         }
 
         log(
             SEVERITY_INFO,
             "Scan complete",
-            "source=$sourceType discovered=${scanResult.items.size} warnings=${scanResult.warnings.size}",
+            "source=$sourceType discovered=${orderedItems.size} warnings=${scanResult.warnings.size}",
         )
-        persistRunningSnapshot()
+        lastProgressAt = nowEpochMs()
+        persistSnapshot(
+            phase = RunPhase.RUNNING,
+            continuationCursorValue = currentCursor,
+        )
         emitProgress(force = true)
-        cancelIfRequested()?.let { return@withContext it }
+        finalizeCanceledIfRequested()?.let { return@withContext it }
 
-        for (item in scanResult.items) {
-            cancelIfRequested()?.let { return@withContext it }
+        val startIndex = parseContinuationCursor(currentCursor, orderedItems.size)
+        if (startIndex > 0) {
+            log(
+                SEVERITY_INFO,
+                "Continuation checkpoint restored",
+                "cursor=$startIndex total=${orderedItems.size}",
+            )
+        }
+
+        var index = startIndex
+        var processedInChunk = 0
+        val chunkStartedAt = nowEpochMs()
+
+        while (index < orderedItems.size) {
+            finalizeCanceledIfRequested()?.let { return@withContext it }
+
+            if (shouldPauseChunk(
+                    executionMode = normalizedExecutionMode,
+                    chunkStartedAt = chunkStartedAt,
+                    processedInChunk = processedInChunk,
+                )
+            ) {
+                currentCursor = index.toString()
+                persistSnapshot(
+                    phase = RunPhase.WAITING_RETRY,
+                    continuationCursorValue = currentCursor,
+                )
+                log(
+                    SEVERITY_INFO,
+                    "Chunk paused for system window",
+                    "cursor=$currentCursor resumeCount=$resumeCount processedInChunk=$processedInChunk",
+                )
+                metric("chunk_paused", "cursor=$currentCursor")
+                return@withContext RunExecutionResult(
+                    runId = runIdValue,
+                    status = RunStatus.RUNNING,
+                    uploadedCount = uploadedCount,
+                    skippedCount = skippedCount,
+                    failedCount = failedCount,
+                    summaryError = summaryError,
+                    phase = RunPhase.WAITING_RETRY,
+                    continuationCursor = currentCursor,
+                    resumeCount = resumeCount,
+                    lastProgressAtEpochMs = lastProgressAt,
+                    pausedForContinuation = true,
+                )
+            }
+
+            val item = orderedItems[index]
             val record = backupRecordRepository.findByPlanAndMediaItem(planId, item.mediaId)
             if (record != null) {
                 skippedCount += 1
                 log(SEVERITY_INFO, "Skipped item", "mediaId=${item.mediaId} reason=already_backed_up")
-                persistRunningSnapshot()
+                index += 1
+                processedInChunk += 1
+                currentCursor = if (index < orderedItems.size) index.toString() else null
+                lastProgressAt = nowEpochMs()
+                persistSnapshot(
+                    phase = RunPhase.RUNNING,
+                    continuationCursorValue = currentCursor,
+                )
                 emitProgress()
-                cancelIfRequested()?.let { return@withContext it }
                 continue
             }
 
@@ -431,7 +597,14 @@ class RunPlanBackupUseCase(
                 val message = "Unable to read source item ${item.mediaId}."
                 summaryError = summaryError ?: message
                 log(SEVERITY_ERROR, message)
-                persistRunningSnapshot()
+                index += 1
+                processedInChunk += 1
+                currentCursor = if (index < orderedItems.size) index.toString() else null
+                lastProgressAt = nowEpochMs()
+                persistSnapshot(
+                    phase = RunPhase.RUNNING,
+                    continuationCursorValue = currentCursor,
+                )
                 emitProgress()
                 continue
             }
@@ -476,20 +649,33 @@ class RunPlanBackupUseCase(
                 summaryError = summaryError ?: message
                 log(SEVERITY_ERROR, message, throwable.toLogDetail())
             }
-            persistRunningSnapshot()
+            index += 1
+            processedInChunk += 1
+            currentCursor = if (index < orderedItems.size) index.toString() else null
+            lastProgressAt = nowEpochMs()
+            persistSnapshot(
+                phase = RunPhase.RUNNING,
+                continuationCursorValue = currentCursor,
+            )
             emitProgress()
-            cancelIfRequested()?.let { return@withContext it }
+            finalizeCanceledIfRequested()?.let { return@withContext it }
         }
 
-        cancelIfRequested()?.let { return@withContext it }
+        finalizeCanceledIfRequested()?.let { return@withContext it }
+        persistSnapshot(
+            phase = RunPhase.FINISHING,
+            continuationCursorValue = null,
+        )
+
         val finalStatus = when {
             failedCount > 0 && uploadedCount == 0 && skippedCount == 0 -> RunStatus.FAILED
             failedCount > 0 -> RunStatus.PARTIAL
             else -> RunStatus.SUCCESS
         }
 
+        metric("run_completed", "status=$finalStatus")
         finalizeRun(
-            runId = runId,
+            runId = runIdValue,
             planId = planId,
             startedAt = startedAt,
             scanned = scannedCount,
@@ -499,8 +685,58 @@ class RunPlanBackupUseCase(
             summaryError = summaryError,
             status = finalStatus,
             triggerSource = normalizedTriggerSource,
+            executionMode = normalizedExecutionMode,
+            resumeCount = resumeCount,
+            lastProgressAt = lastProgressAt,
             log = ::log,
         )
+    }
+
+    private suspend fun createNewRun(
+        planId: Long,
+        triggerSource: String,
+        executionMode: String,
+        continuationCursor: String?,
+    ): RunEntity {
+        val startedAt = nowEpochMs()
+        val runId = runRepository.createRun(
+            RunEntity(
+                planId = planId,
+                status = RunStatus.RUNNING,
+                startedAtEpochMs = startedAt,
+                heartbeatAtEpochMs = startedAt,
+                triggerSource = triggerSource,
+                executionMode = executionMode,
+                phase = RunPhase.RUNNING,
+                continuationCursor = continuationCursor,
+                resumeCount = 0,
+                lastProgressAtEpochMs = startedAt,
+            ),
+        )
+        return RunEntity(
+            runId = runId,
+            planId = planId,
+            status = RunStatus.RUNNING,
+            startedAtEpochMs = startedAt,
+            heartbeatAtEpochMs = startedAt,
+            triggerSource = triggerSource,
+            executionMode = executionMode,
+            phase = RunPhase.RUNNING,
+            continuationCursor = continuationCursor,
+            resumeCount = 0,
+            lastProgressAtEpochMs = startedAt,
+        )
+    }
+
+    private fun shouldPauseChunk(
+        executionMode: String,
+        chunkStartedAt: Long,
+        processedInChunk: Int,
+    ): Boolean {
+        if (executionMode != RunExecutionMode.BACKGROUND) return false
+        if (processedInChunk <= 0) return false
+        if (processedInChunk >= MAX_ITEMS_PER_CHUNK_BACKGROUND) return true
+        return nowEpochMs() - chunkStartedAt >= MAX_WALL_MS_BACKGROUND
     }
 
     private fun maskRemotePath(path: String): String {
@@ -525,6 +761,9 @@ class RunPlanBackupUseCase(
         summaryError: String?,
         status: String,
         triggerSource: String,
+        executionMode: String,
+        resumeCount: Int,
+        lastProgressAt: Long,
         log: suspend (String, String, String?) -> Unit,
     ): RunExecutionResult {
         val finishedAt = nowEpochMs()
@@ -542,6 +781,11 @@ class RunPlanBackupUseCase(
                 failedCount = failed,
                 summaryError = summaryError,
                 triggerSource = triggerSource,
+                executionMode = executionMode,
+                phase = RunPhase.TERMINAL,
+                continuationCursor = null,
+                resumeCount = resumeCount,
+                lastProgressAtEpochMs = maxOf(lastProgressAt, finishedAt),
             ),
         )
         log(SEVERITY_INFO, "Run finished", "status=$status uploaded=$uploaded skipped=$skipped failed=$failed")
@@ -552,6 +796,11 @@ class RunPlanBackupUseCase(
             skippedCount = skipped,
             failedCount = failed,
             summaryError = summaryError,
+            phase = RunPhase.TERMINAL,
+            continuationCursor = null,
+            resumeCount = resumeCount,
+            lastProgressAtEpochMs = maxOf(lastProgressAt, finishedAt),
+            pausedForContinuation = false,
         )
     }
 
@@ -565,17 +814,36 @@ class RunPlanBackupUseCase(
         }
     }
 
-    private data class SourceScanResult(
-        val items: List<MediaImageItem>,
-        val warnings: List<String> = emptyList(),
-    )
-
     private fun normalizeTriggerSource(source: String): String {
         val normalized = source.trim().uppercase(Locale.US)
         return when (normalized) {
             RunTriggerSource.SCHEDULED -> RunTriggerSource.SCHEDULED
             else -> RunTriggerSource.MANUAL
         }
+    }
+
+    private fun normalizeExecutionMode(
+        executionMode: String?,
+        triggerSource: String,
+    ): String {
+        val normalized = executionMode?.trim()?.uppercase(Locale.US)
+        return when (normalized) {
+            RunExecutionMode.BACKGROUND -> RunExecutionMode.BACKGROUND
+            RunExecutionMode.FOREGROUND -> RunExecutionMode.FOREGROUND
+            else -> if (triggerSource == RunTriggerSource.SCHEDULED) {
+                RunExecutionMode.BACKGROUND
+            } else {
+                RunExecutionMode.FOREGROUND
+            }
+        }
+    }
+
+    private fun parseContinuationCursor(
+        cursor: String?,
+        maxExclusive: Int,
+    ): Int {
+        val parsed = cursor?.trim()?.toIntOrNull() ?: 0
+        return parsed.coerceIn(0, maxExclusive)
     }
 
     private suspend fun readPersistedStatus(runId: Long): String? =
@@ -608,6 +876,9 @@ class RunPlanBackupUseCase(
                     finishedAtEpochMs = now,
                     heartbeatAtEpochMs = now,
                     summaryError = summary,
+                    phase = RunPhase.TERMINAL,
+                    continuationCursor = null,
+                    lastProgressAtEpochMs = maxOf(existingRun.lastProgressAtEpochMs, now),
                 ),
             )
             runLogRepository.createLog(
@@ -626,6 +897,11 @@ class RunPlanBackupUseCase(
         }
     }
 
+    private data class SourceScanResult(
+        val items: List<MediaImageItem>,
+        val warnings: List<String> = emptyList(),
+    )
+
     companion object {
         private const val SOURCE_TYPE_ALBUM = "ALBUM"
         private const val SOURCE_TYPE_FOLDER = "FOLDER"
@@ -637,6 +913,8 @@ class RunPlanBackupUseCase(
         private const val DEFAULT_CANCELED_SUMMARY = "Run canceled by user."
         private const val DEFAULT_INTERRUPTED_SUMMARY = "Run interrupted before completion."
         private const val MAX_ACTIVE_RUN_LOOKBACK = 200
+        private const val MAX_WALL_MS_BACKGROUND = 7L * 60L * 1000L
+        private const val MAX_ITEMS_PER_CHUNK_BACKGROUND = 80
         private val ACTIVE_RUN_STATUSES = setOf(
             RunStatus.RUNNING,
             RunStatus.CANCEL_REQUESTED,
@@ -651,7 +929,28 @@ data class RunExecutionResult(
     val skippedCount: Int,
     val failedCount: Int,
     val summaryError: String? = null,
+    val phase: String = RunPhase.TERMINAL,
+    val continuationCursor: String? = null,
+    val resumeCount: Int = 0,
+    val lastProgressAtEpochMs: Long = 0L,
+    val pausedForContinuation: Boolean = false,
 )
+
+private fun RunEntity.toExecutionResult(pausedForContinuation: Boolean): RunExecutionResult {
+    return RunExecutionResult(
+        runId = runId,
+        status = status,
+        uploadedCount = uploadedCount,
+        skippedCount = skippedCount,
+        failedCount = failedCount,
+        summaryError = summaryError,
+        phase = phase,
+        continuationCursor = continuationCursor,
+        resumeCount = resumeCount,
+        lastProgressAtEpochMs = lastProgressAtEpochMs,
+        pausedForContinuation = pausedForContinuation,
+    )
+}
 
 internal object PathRenderer {
     private const val DEFAULT_TEMPLATE = "{year}/{month}/{day}"
@@ -805,5 +1104,5 @@ private fun skezza.nasbox.data.smb.SmbConnectionFailure.toUserMessage(): String 
     is skezza.nasbox.data.smb.SmbConnectionFailure.RemotePermissionDenied -> "Remote permissions denied upload access."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout -> "Connection timed out while uploading."
     is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption -> "Network interrupted during upload."
-    is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Warnings"
+    is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Upload failed due to an unknown connection issue."
 }

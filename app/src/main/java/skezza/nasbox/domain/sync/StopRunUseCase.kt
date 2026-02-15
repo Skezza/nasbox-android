@@ -26,6 +26,9 @@ class StopRunUseCase(
                         finishedAtEpochMs = now,
                         heartbeatAtEpochMs = now,
                         summaryError = run.summaryError ?: DEFAULT_CANCELED_SUMMARY,
+                        phase = RunPhase.TERMINAL,
+                        continuationCursor = null,
+                        lastProgressAtEpochMs = maxOf(run.lastProgressAtEpochMs, now),
                     ),
                 )
                 runLogRepository.createLog(

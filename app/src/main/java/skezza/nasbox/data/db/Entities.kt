@@ -152,6 +152,15 @@ data class RunEntity(
     val summaryError: String? = null,
     @ColumnInfo(name = "trigger_source")
     val triggerSource: String = "MANUAL",
+    @ColumnInfo(name = "execution_mode")
+    val executionMode: String = "FOREGROUND",
+    val phase: String = "RUNNING",
+    @ColumnInfo(name = "continuation_cursor")
+    val continuationCursor: String? = null,
+    @ColumnInfo(name = "resume_count")
+    val resumeCount: Int = 0,
+    @ColumnInfo(name = "last_progress_at_epoch_ms")
+    val lastProgressAtEpochMs: Long = startedAtEpochMs,
 )
 
 @Entity(

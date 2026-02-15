@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import skezza.nasbox.domain.sync.RunExecutionMode
+import skezza.nasbox.domain.sync.RunPhase
 import skezza.nasbox.domain.sync.RunStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,6 +72,10 @@ fun AuditScreen(
                 onSelected = viewModel::setFilter,
             )
 
+            if (state.phaseTransitions.isNotEmpty()) {
+                PhaseTransitionsCard(transitions = state.phaseTransitions, onOpenRun = onOpenRun)
+            }
+
             if (state.runs.isEmpty()) {
                 Text("No runs match this filter.")
             } else {
@@ -87,7 +93,7 @@ fun AuditScreen(
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 Text(
-                                    "${run.planName} - ${statusLabel(run.status)} (${run.triggerSource.lowercase()})",
+                                    "${run.planName} - ${statusLabel(run.status, run.phase, run.executionMode)} (${modeBadge(run.triggerSource, run.executionMode)})",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                 )
@@ -112,6 +118,52 @@ fun AuditScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhaseTransitionsCard(
+    transitions: List<AuditPhaseTransition>,
+    onOpenRun: (Long) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("Debug: phase transitions (last 20)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            transitions.forEach { transition ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenRun(transition.runId) }
+                        .padding(vertical = 2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        "${transition.planName} - ${transition.message}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "${formatTimestamp(transition.timestampEpochMs)} (run #${transition.runId})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    transition.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+                        Text(
+                            detail,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -167,7 +219,7 @@ fun AuditRunDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             Text(
-                                "${run.planName} - ${statusLabel(run.status)} (${run.triggerSource.lowercase()})",
+                                "${run.planName} - ${statusLabel(run.status, run.phase, run.executionMode)} (${modeBadge(run.triggerSource, run.executionMode)})",
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -290,16 +342,39 @@ private fun FilterRow(
     }
 }
 
-private fun statusLabel(status: String): String = when (status.uppercase(Locale.US)) {
-    RunStatus.SUCCESS -> "Success"
-    RunStatus.PARTIAL -> "Partial"
-    RunStatus.FAILED -> "Failed"
-    RunStatus.RUNNING -> "Running"
-    RunStatus.CANCEL_REQUESTED -> "Cancel requested"
-    RunStatus.CANCELED -> "Canceled"
-    RunStatus.INTERRUPTED -> "Interrupted"
-    else -> status
+private fun statusLabel(
+    status: String,
+    phase: String,
+    executionMode: String,
+): String {
+    val normalizedPhase = phase.uppercase(Locale.US)
+    val normalizedMode = executionMode.uppercase(Locale.US)
+    if (status.uppercase(Locale.US) == RunStatus.RUNNING) {
+        return when (normalizedPhase) {
+            RunPhase.WAITING_RETRY -> "Waiting for background window"
+            RunPhase.FINISHING -> "Finishing"
+            else -> if (normalizedMode == RunExecutionMode.BACKGROUND) {
+                "Running (background)"
+            } else {
+                "Running (manual foreground)"
+            }
+        }
+    }
+    return when (status.uppercase(Locale.US)) {
+        RunStatus.SUCCESS -> "Success"
+        RunStatus.PARTIAL -> "Partial"
+        RunStatus.FAILED -> "Failed"
+        RunStatus.CANCEL_REQUESTED -> "Cancel requested"
+        RunStatus.CANCELED -> "Canceled"
+        RunStatus.INTERRUPTED -> "Interrupted"
+        else -> status
+    }
 }
+
+private fun modeBadge(
+    triggerSource: String,
+    executionMode: String,
+): String = "${triggerSource.lowercase(Locale.US)}/${executionMode.lowercase(Locale.US)}"
 
 private fun formatTimestamp(epochMs: Long): String =
     SimpleDateFormat("MMM d, HH:mm:ss", Locale.US).format(Date(epochMs))
