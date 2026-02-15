@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SMB Sync"
+rootProject.name = "NASBox"
 include(":app")

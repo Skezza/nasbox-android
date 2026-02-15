@@ -1,6 +1,6 @@
-# SMBSync (VaultPilot MVP)
+# NASBox (VaultPilot MVP)
 
-SMBSync is an Android app focused on **manual, archive-only photo backup** from local albums to SMB shares (SMB2/3).
+NASBox is an Android app focused on **manual, archive-only photo backup** from local albums to SMB shares (SMB2/3).
 
 ## MVP scope
 
@@ -30,9 +30,9 @@ See:
 
 ## Project structure (current)
 
-- `app/src/main/java/skezza/smbsync/ui/**` — Compose navigation with Dashboard, Plans, and Vault feature screens
-- `app/src/main/java/skezza/smbsync/data/db/**` — Room entities, DAOs, database class, provider
-- `app/src/main/java/skezza/smbsync/data/repository/**` — repository interfaces and Room-backed implementations
+- `app/src/main/java/skezza/nasbox/ui/**` — Compose navigation with Dashboard, Plans, and Vault feature screens
+- `app/src/main/java/skezza/nasbox/data/db/**` — Room entities, DAOs, database class, provider
+- `app/src/main/java/skezza/nasbox/data/repository/**` — repository interfaces and Room-backed implementations
 - `app/src/test/java/**` — baseline persistence tests
 
 ## SMB connection prerequisites
