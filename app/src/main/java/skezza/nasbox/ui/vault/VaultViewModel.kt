@@ -7,11 +7,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -38,11 +40,13 @@ class VaultViewModel(
     private val discoverSmbServersUseCase: DiscoverSmbServersUseCase,
     private val browseSmbDestinationUseCase: BrowseSmbDestinationUseCase,
     private val validateServerInput: ValidateServerInputUseCase = ValidateServerInputUseCase(),
+    private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
 ) : ViewModel() {
 
     private val testingServerIds = MutableStateFlow<Set<Long>>(emptySet())
     private var pendingDiscoverySelection: DiscoveredSmbServer? = null
     private var pendingAutoBrowse: Boolean = false
+    private var autoRefreshJob: Job? = null
 
     private val serverItemsFlow = serverRepository.observeServers()
         .combine(testingServerIds) { servers, testing ->
@@ -177,15 +181,35 @@ class VaultViewModel(
 
                 credentialStore.savePassword(credentialAlias, state.password)
 
+                val trimmedName = state.name.trim()
+                val trimmedHost = state.host.trim()
+                val normalizedShare = normalizeShare(state.shareName)
+                val trimmedBasePath = state.basePath.trim()
+                val trimmedDomain = state.domain.trim()
+                val trimmedUsername = state.username.trim()
+
+                val testResult = testSmbConnectionUseCase.testDraftServer(
+                    host = trimmedHost,
+                    shareName = normalizedShare,
+                    username = trimmedUsername,
+                    password = state.password,
+                )
+                val now = nowEpochMs()
+
                 val entity = ServerEntity(
                     serverId = state.editingServerId ?: 0,
-                    name = state.name.trim(),
-                    host = state.host.trim(),
-                    shareName = normalizeShare(state.shareName),
-                    basePath = state.basePath.trim(),
-                    domain = state.domain.trim(),
-                    username = state.username.trim(),
+                    name = trimmedName,
+                    host = trimmedHost,
+                    shareName = normalizedShare,
+                    basePath = trimmedBasePath,
+                    domain = trimmedDomain,
+                    username = trimmedUsername,
                     credentialAlias = credentialAlias,
+                    lastTestStatus = if (testResult.success) "SUCCESS" else "FAILED",
+                    lastTestTimestampEpochMs = now,
+                    lastTestLatencyMs = testResult.latencyMs,
+                    lastTestErrorCategory = testResult.category.name,
+                    lastTestErrorMessage = if (testResult.success) null else testResult.message,
                 )
 
                 if (state.editingServerId == null) {
@@ -205,11 +229,34 @@ class VaultViewModel(
 
     fun testServerConnection(serverId: Long) {
         viewModelScope.launch {
-            testingServerIds.value = testingServerIds.value + serverId
-            runCatching {
-                val result = testSmbConnectionUseCase.testPersistedServer(serverId)
-            }.onFailure {
+            runServerTest(serverId)
+        }
+    }
+
+    fun refreshServerOnlineStatus() {
+        if (autoRefreshJob?.isActive == true) return
+        autoRefreshJob = viewModelScope.launch {
+            val servers = serverRepository.observeServers().first()
+            servers.forEach { server ->
+                runServerTest(server.serverId)
             }
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (autoRefreshJob == job) {
+                    autoRefreshJob = null
+                }
+            }
+        }
+    }
+
+    private suspend fun runServerTest(serverId: Long) {
+        if (serverId in testingServerIds.value) return
+        testingServerIds.value = testingServerIds.value + serverId
+        try {
+            runCatching {
+                testSmbConnectionUseCase.testPersistedServer(serverId)
+            }
+        } finally {
             testingServerIds.value = testingServerIds.value - serverId
         }
     }

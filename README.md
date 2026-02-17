@@ -19,7 +19,8 @@ Developing NASBox was an opportunity to test the latest Codex 5.3 and also get s
 - ✅ Phase 5.5.1 complete: share discovery now uses SMBJ RPC (`IPC$` + SRVSVC `NetShareEnum`) first, then falls back to SMBJ `listShares` when RPC returns no data.
 - ✅ Phase 6 complete: Dashboard mission control is implemented with health status, primary run/test actions, live run strip, and persisted timeline events.
 - ✅ Phase 6.5 complete: Dashboard now supports direct stop-to-canceled control, active `Current runs`, terminal-only `Recent runs`, and a live run-detail drill-in.
-- ⏳ Next: Phase 7 UX hardening and resilience.
+- ✅ Phase 7 complete: Vault + Dashboard UX hardening and resilience; the UI is intentionally guarded since it was relatively hard.
+- ℹ️ Current roadmap pauses at Phase 7 unless new priorities appear; no further phases are planned yet.
 
 See:
 - `project_plan.md` for phase-by-phase roadmap

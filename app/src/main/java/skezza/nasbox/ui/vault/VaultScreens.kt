@@ -62,6 +62,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 import skezza.nasbox.ui.common.ErrorHint
 import skezza.nasbox.ui.common.LoadState
@@ -175,7 +176,7 @@ fun VaultScreen(
                 ) {
                     StateCard(
                         title = "No servers yet",
-                        description = "Add your first NAS destination to start backing up photos.",
+                        description = "Add your first server or share, or press Discover in the bottom right to scan for SMB hosts.",
                         actionLabel = "Add server",
                         onAction = onAddServer,
                     )
@@ -375,6 +376,7 @@ fun ServerEditorScreen(
                 }
             }
             Spacer(modifier = Modifier.height(30.dp))
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
@@ -507,7 +509,22 @@ private fun BrowseDestinationDialog(
                         }
                     }
                 }
-                if (state.isLoading) {
+                val shouldShowLoadingLabel = state.isLoading && when {
+                    state.selectedShare.isBlank() -> state.shares.isEmpty()
+                    else -> state.directories.isEmpty()
+                }
+                var showLoadingLabel by remember { mutableStateOf(false) }
+                LaunchedEffect(shouldShowLoadingLabel) {
+                    if (!shouldShowLoadingLabel) {
+                        showLoadingLabel = false
+                        return@LaunchedEffect
+                    }
+                    delay(200)
+                    if (shouldShowLoadingLabel) {
+                        showLoadingLabel = true
+                    }
+                }
+                if (showLoadingLabel) {
                     Text("Loading...")
                 }
                 if (!state.errorMessage.isNullOrBlank()) {

@@ -94,6 +94,9 @@ fun NasBoxApp(
             browseSmbDestinationUseCase = appContainer.browseSmbDestinationUseCase,
         ),
     )
+    LaunchedEffect(Unit) {
+        vaultViewModel.refreshServerOnlineStatus()
+    }
     val plansViewModel: PlansViewModel = viewModel(
         factory = PlansViewModel.factory(
             planRepository = appContainer.planRepository,
