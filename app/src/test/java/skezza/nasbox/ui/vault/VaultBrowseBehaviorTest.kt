@@ -75,7 +75,7 @@ class VaultBrowseBehaviorTest {
             ),
             discoverSmbServersUseCase = DiscoverSmbServersUseCase(
                 scanner = object : SmbServerDiscoveryScanner {
-                    override suspend fun discover(): List<DiscoveredSmbServer> = emptyList()
+                    override fun discover(): Flow<List<DiscoveredSmbServer>> = flowOf(emptyList())
                 },
             ),
             browseSmbDestinationUseCase = BrowseSmbDestinationUseCase(smbClient, emptyShareRpcEnumerator()),

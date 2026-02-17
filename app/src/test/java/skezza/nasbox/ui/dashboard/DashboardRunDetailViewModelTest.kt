@@ -17,9 +17,11 @@ import skezza.nasbox.data.db.PlanEntity
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.db.RunTimelineLogRow
+import skezza.nasbox.data.db.ServerEntity
 import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
+import skezza.nasbox.data.repository.ServerRepository
 import skezza.nasbox.domain.sync.RunStatus
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -48,6 +50,7 @@ class DashboardRunDetailViewModelTest {
                     ),
                 ),
             ),
+            serverRepository = FakeServerRepository(MutableStateFlow(emptyList())),
             runRepository = FakeRunRepository(
                 MutableStateFlow(
                     listOf(
@@ -109,6 +112,7 @@ class DashboardRunDetailViewModelTest {
         val viewModel = DashboardRunDetailViewModel(
             runId = runId,
             planRepository = FakePlanRepository(MutableStateFlow(emptyList())),
+            serverRepository = FakeServerRepository(MutableStateFlow(emptyList())),
             runRepository = FakeRunRepository(
                 MutableStateFlow(
                     listOf(
@@ -160,7 +164,52 @@ class DashboardRunDetailViewModelTest {
 
         assertEquals(DashboardRunFileStatus.FAILED, activity.status)
         assertEquals("IMG_0042.jpg", activity.displayName)
-        assertEquals("reason=upload_failed", activity.detail)
+        assertEquals("Upload failed", activity.detail)
+    }
+
+    @Test
+    fun uiState_fileActivity_forFolderSource_showsFilenameOnlyForSafMediaId() = runTest {
+        val runId = 11L
+        val mediaId = "content://com.android.externalstorage.documents/document/primary%3APictures%2FScreenshots%2FIMG_9911.jpg"
+        val viewModel = DashboardRunDetailViewModel(
+            runId = runId,
+            planRepository = FakePlanRepository(MutableStateFlow(emptyList())),
+            serverRepository = FakeServerRepository(MutableStateFlow(emptyList())),
+            runRepository = FakeRunRepository(
+                MutableStateFlow(
+                    listOf(
+                        RunEntity(
+                            runId = runId,
+                            planId = 77,
+                            status = RunStatus.SUCCESS,
+                            triggerSource = "MANUAL",
+                            startedAtEpochMs = 1_000L,
+                            finishedAtEpochMs = 2_000L,
+                        ),
+                    ),
+                ),
+            ),
+            runLogRepository = FakeRunLogRepository(
+                MutableStateFlow(
+                    listOf(
+                        RunLogEntity(
+                            logId = 50,
+                            runId = runId,
+                            timestampEpochMs = 1_500L,
+                            severity = "INFO",
+                            message = "Skipped item",
+                            detail = "mediaId=$mediaId reason=already_backed_up",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        advanceUntilIdle()
+        val activity = viewModel.uiState.value.fileActivities.first()
+
+        assertEquals("IMG_9911.jpg", activity.displayName)
+        assertEquals("Already backed up", activity.detail)
     }
 
     @Test
@@ -183,6 +232,7 @@ class DashboardRunDetailViewModelTest {
                     ),
                 ),
             ),
+            serverRepository = FakeServerRepository(MutableStateFlow(emptyList())),
             runRepository = FakeRunRepository(
                 MutableStateFlow(
                     listOf(
@@ -275,5 +325,17 @@ class DashboardRunDetailViewModelTest {
             flowOf(logs.value.filter { it.runId == runId }.sortedByDescending { it.timestampEpochMs }.take(limit))
 
         override fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>> = flowOf(emptyList())
+    }
+
+    private class FakeServerRepository(
+        private val servers: MutableStateFlow<List<ServerEntity>>,
+    ) : ServerRepository {
+        override fun observeServers(): Flow<List<ServerEntity>> = servers
+        override suspend fun getServer(serverId: Long): ServerEntity? =
+            servers.value.firstOrNull { it.serverId == serverId }
+
+        override suspend fun createServer(server: ServerEntity): Long = server.serverId
+        override suspend fun updateServer(server: ServerEntity) = Unit
+        override suspend fun deleteServer(serverId: Long) = Unit
     }
 }

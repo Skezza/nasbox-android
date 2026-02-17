@@ -41,7 +41,7 @@ class VaultViewModelFactoryTest {
 
     private fun fakeDiscoveryUseCase(): DiscoverSmbServersUseCase = DiscoverSmbServersUseCase(
         scanner = object : SmbServerDiscoveryScanner {
-            override suspend fun discover() = emptyList<skezza.nasbox.data.discovery.DiscoveredSmbServer>()
+            override fun discover() = flowOf(emptyList<skezza.nasbox.data.discovery.DiscoveredSmbServer>())
         },
     )
 

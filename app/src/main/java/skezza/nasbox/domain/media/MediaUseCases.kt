@@ -13,7 +13,8 @@ class ListMediaAlbumsUseCase(
 class ListAlbumImagesUseCase(
     private val mediaStoreDataSource: MediaStoreDataSource,
 ) {
-    suspend operator fun invoke(bucketId: String): List<MediaImageItem> = mediaStoreDataSource.listImagesForAlbum(bucketId)
+    suspend operator fun invoke(bucketId: String, includeVideos: Boolean = false): List<MediaImageItem> =
+        mediaStoreDataSource.listImagesForAlbum(bucketId, includeVideos)
 }
 
 fun List<MediaAlbum>.firstCameraAlbumOrNull(): MediaAlbum? {

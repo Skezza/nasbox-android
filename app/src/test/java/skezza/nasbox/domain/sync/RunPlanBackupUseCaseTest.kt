@@ -16,6 +16,7 @@ import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.db.RunTimelineLogRow
 import skezza.nasbox.data.db.ServerEntity
 import skezza.nasbox.data.media.FullDeviceScanResult
+import skezza.nasbox.data.media.FolderScanProgress
 import skezza.nasbox.data.media.MediaAlbum
 import skezza.nasbox.data.media.MediaImageItem
 import skezza.nasbox.data.media.MediaStoreDataSource
@@ -77,6 +78,39 @@ class RunPlanBackupUseCaseTest {
         assertTrue(runRepo.updatedRuns.any { it.status == "RUNNING" })
         assertTrue(logRepo.logs.any { it.message == "Run finished" })
         assertTrue(logRepo.logs.any { it.message == "Run progress" })
+    }
+
+    @Test
+    fun invoke_requestsVideoMediaWhenIncludeVideosEnabled() = runBlocking {
+        val plan = PlanEntity(
+            planId = 11,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+            includeVideos = true,
+        )
+
+        val runRepo = FakeRunRepository()
+        val mediaDataSource = FakeMediaStoreDataSource(albumItems = listOf(
+            MediaImageItem("video-1", "album-1", "clip.mp4", "video/mp4", 1_700_000_000_000, 8),
+        ))
+
+        runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = runRepo,
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = mediaDataSource,
+            smbClient = FakeSmbClient(),
+        )(plan.planId)
+
+        assertTrue(
+            mediaDataSource.albumRequests.any { it.first == plan.sourceAlbum && it.second },
+        )
     }
 
     @Test
@@ -170,6 +204,54 @@ class RunPlanBackupUseCaseTest {
         assertEquals(RunPhase.TERMINAL, secondAttempt.phase)
         assertEquals(85, secondAttempt.uploadedCount)
         assertEquals(85, smbClient.uploadedPaths.size)
+    }
+
+    @Test
+    fun invoke_whenActiveRunExists_returnsActiveRunWithoutStartingAnother() = runBlocking {
+        val plan = PlanEntity(
+            planId = 10,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val runRepo = FakeRunRepository().apply {
+            updatedRuns += RunEntity(
+                runId = 77,
+                planId = plan.planId,
+                status = RunStatus.RUNNING,
+                startedAtEpochMs = 1_000L,
+                heartbeatAtEpochMs = 1_000L,
+                scannedCount = 10,
+                uploadedCount = 3,
+                skippedCount = 1,
+                failedCount = 0,
+                phase = RunPhase.WAITING_RETRY,
+                continuationCursor = "4",
+            )
+        }
+        val smbClient = FakeSmbClient()
+        val result = runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none"),
+            runRepo = runRepo,
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(albumItems = emptyList()),
+            smbClient = smbClient,
+        )(
+            planId = plan.planId,
+            triggerSource = RunTriggerSource.SCHEDULED,
+            executionMode = RunExecutionMode.BACKGROUND,
+        )
+
+        assertEquals(77L, result.runId)
+        assertEquals(RunStatus.RUNNING, result.status)
+        assertEquals(RunPhase.WAITING_RETRY, result.phase)
+        assertTrue(result.pausedForContinuation)
+        assertTrue(smbClient.uploadedPaths.isEmpty())
     }
 
     @Test
@@ -669,16 +751,30 @@ class RunPlanBackupUseCaseTest {
         private val throwOnFullDeviceScan: Boolean = false,
         private val unreadableItemIds: Set<String> = emptySet(),
     ) : MediaStoreDataSource {
+        val albumRequests = mutableListOf<Pair<String, Boolean>>()
         override suspend fun listAlbums(): List<MediaAlbum> =
             listOf(MediaAlbum("album-1", "Camera", albumItems.size, null))
 
-        override suspend fun listImagesForAlbum(bucketId: String): List<MediaImageItem> {
+        override suspend fun listImagesForAlbum(bucketId: String, includeVideos: Boolean): List<MediaImageItem> {
             if (throwOnAlbumScan) error("permission denied")
+            albumRequests += bucketId to includeVideos
             return albumItems
         }
 
-        override suspend fun listFilesForFolder(folderPathOrUri: String): List<MediaImageItem> {
+        override suspend fun listFilesForFolder(
+            folderPathOrUri: String,
+            onProgress: (suspend (FolderScanProgress) -> Unit)?,
+            shouldContinue: (() -> Boolean)?,
+        ): List<MediaImageItem> {
             if (throwOnFolderScan) error("folder denied")
+            onProgress?.invoke(
+                FolderScanProgress(
+                    discoveredFiles = folderItems.size,
+                    visitedDirectories = 1,
+                    currentPath = folderPathOrUri,
+                    completed = true,
+                ),
+            )
             return folderItems
         }
 

@@ -48,6 +48,7 @@ class PlansViewModelMappingTest {
         assertEquals(17, mappedBack.scheduleDayOfMonth)
         assertEquals(12, mappedBack.scheduleIntervalHours)
         assertEquals(21 * 60, mappedBack.scheduleTimeMinutes)
+        assertEquals(plan.progressNotificationEnabled, mappedBack.progressNotificationEnabled)
     }
 
     @Test
@@ -73,5 +74,29 @@ class PlansViewModelMappingTest {
         assertTrue(entity.scheduleDaysMask != 0)
         assertEquals(31, entity.scheduleDayOfMonth)
         assertEquals(168, entity.scheduleIntervalHours)
+        assertTrue(entity.progressNotificationEnabled)
+    }
+
+    @Test
+    fun formatFolderSourceSummary_usesLastDirectoryName_forFilePath() {
+        val summary = formatFolderSourceSummary("/storage/emulated/0/DCIM/Camera")
+
+        assertEquals("Camera", summary)
+    }
+
+    @Test
+    fun formatFolderSourceSummary_decodesSafTreeUri_andUsesLastDirectoryName() {
+        val summary = formatFolderSourceSummary(
+            "content://com.android.externalstorage.documents/tree/primary%3ADCIM%2FCamera/document/primary%3ADCIM%2FCamera",
+        )
+
+        assertEquals("Camera", summary)
+    }
+
+    @Test
+    fun formatFolderSourceSummary_returnsNotSet_whenBlank() {
+        val summary = formatFolderSourceSummary("   ")
+
+        assertEquals("not set", summary)
     }
 }

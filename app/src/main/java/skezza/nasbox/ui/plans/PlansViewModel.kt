@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +41,7 @@ import skezza.nasbox.domain.schedule.normalizeScheduleMinutes
 import skezza.nasbox.domain.schedule.normalizeWeeklyDaysMask
 import skezza.nasbox.domain.schedule.weeklyMaskFor
 import skezza.nasbox.domain.sync.EnqueuePlanRunUseCase
+import skezza.nasbox.domain.sync.PlanRunEnqueueResult
 import skezza.nasbox.domain.sync.RunTriggerSource
 import skezza.nasbox.ui.common.LoadState
 
@@ -78,8 +81,8 @@ class PlansViewModel(
             val sourceType = parsePlanSourceType(plan.sourceType)
             val sourceSummary = when (sourceType) {
                 PlanSourceType.ALBUM -> "Album (${plan.sourceAlbum})${if (plan.includeVideos) " + videos" else ""}"
-                PlanSourceType.FOLDER -> "Folder (${plan.folderPath.ifBlank { "not set" }})"
-                PlanSourceType.FULL_DEVICE -> "Full device backup (shared storage)"
+                PlanSourceType.FOLDER -> "Folder (${formatFolderSourceSummary(plan.folderPath)})"
+                PlanSourceType.FULL_DEVICE -> "All shared storage"
             }
             val scheduleFrequency = PlanScheduleFrequency.fromRaw(plan.scheduleFrequency)
             val scheduleDaysMask = normalizeWeeklyDaysMask(plan.scheduleDaysMask)
@@ -97,6 +100,7 @@ class PlansViewModel(
                 template = plan.directoryTemplate,
                 filenamePattern = plan.filenamePattern,
                 scheduleEnabled = plan.scheduleEnabled,
+                progressNotificationEnabled = plan.progressNotificationEnabled,
                 scheduleTimeMinutes = normalizeScheduleMinutes(plan.scheduleTimeMinutes),
                 scheduleFrequency = scheduleFrequency,
                 scheduleDaysMask = scheduleDaysMask,
@@ -197,6 +201,9 @@ class PlansViewModel(
     fun updateEditorUseAlbumTemplating(value: Boolean) { _editorState.value = _editorState.value.copy(useAlbumTemplating = value) }
     fun updateEditorDirectoryTemplate(value: String) { _editorState.value = _editorState.value.copy(directoryTemplate = value) }
     fun updateEditorFilenamePattern(value: String) { _editorState.value = _editorState.value.copy(filenamePattern = value) }
+    fun updateEditorProgressNotificationEnabled(value: Boolean) {
+        _editorState.value = _editorState.value.copy(progressNotificationEnabled = value)
+    }
     fun updateEditorScheduleEnabled(value: Boolean) { _editorState.value = _editorState.value.copy(scheduleEnabled = value) }
     fun updateEditorScheduleTimeMinutes(value: Int) {
         _editorState.value = _editorState.value.copy(scheduleTimeMinutes = normalizeScheduleMinutes(value))
@@ -308,12 +315,22 @@ class PlansViewModel(
 
     fun runPlanNow(planId: Long) {
         viewModelScope.launch {
+            _message.value = null
             _activeRunPlanIds.value = _activeRunPlanIds.value + planId
             runCatching {
                 enqueuePlanRunUseCase(planId, RunTriggerSource.MANUAL)
             }
-                .onSuccess {
-                    _message.value = "Run queued."
+                .onSuccess { result ->
+                    when (result) {
+                        PlanRunEnqueueResult.ENQUEUED,
+                        PlanRunEnqueueResult.IGNORED_ALREADY_ACTIVE,
+                        PlanRunEnqueueResult.COALESCED,
+                        -> Unit
+
+                        PlanRunEnqueueResult.IGNORED_DISABLED -> {
+                            _message.value = "Job is disabled."
+                        }
+                    }
                 }
                 .onFailure { error ->
                     val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.simpleName.orEmpty()
@@ -395,6 +412,7 @@ data class PlanListItemUiState(
     val template: String,
     val filenamePattern: String,
     val scheduleEnabled: Boolean,
+    val progressNotificationEnabled: Boolean,
     val scheduleTimeMinutes: Int,
     val scheduleFrequency: PlanScheduleFrequency,
     val scheduleDaysMask: Int,
@@ -427,6 +445,7 @@ data class PlanEditorUiState(
     val useAlbumTemplating: Boolean = false,
     val directoryTemplate: String = "",
     val filenamePattern: String = "",
+    val progressNotificationEnabled: Boolean = true,
     val scheduleEnabled: Boolean = false,
     val scheduleTimeMinutes: Int = PLAN_DEFAULT_SCHEDULE_MINUTES,
     val scheduleFrequency: PlanScheduleFrequency = PlanScheduleFrequency.DAILY,
@@ -438,6 +457,46 @@ data class PlanEditorUiState(
 
 internal fun parsePlanSourceType(value: String): PlanSourceType =
     PlanSourceType.entries.firstOrNull { it.name == value } ?: PlanSourceType.ALBUM
+
+internal fun formatFolderSourceSummary(folderPath: String): String {
+    val trimmed = folderPath.trim()
+    if (trimmed.isBlank()) return "not set"
+
+    val normalizedPath = extractDocumentPathFromContentUri(trimmed) ?: trimmed
+    return normalizedPath
+        .replace('\\', '/')
+        .trim('/')
+        .substringAfterLast('/')
+        .ifBlank { normalizedPath }
+}
+
+private fun extractDocumentPathFromContentUri(folderPath: String): String? {
+    if (!folderPath.startsWith(CONTENT_URI_SCHEME, ignoreCase = true)) return null
+
+    val encodedDocumentId = extractDocumentId(folderPath, TREE_MARKER)
+        ?: extractDocumentId(folderPath, DOCUMENT_MARKER)
+        ?: return null
+
+    val decodedDocumentId = decodeUriComponent(encodedDocumentId)
+    val pathWithoutVolume = decodedDocumentId.substringAfter(':', missingDelimiterValue = decodedDocumentId)
+    return pathWithoutVolume.ifBlank {
+        decodedDocumentId.substringBefore(':', missingDelimiterValue = decodedDocumentId)
+    }
+}
+
+private fun extractDocumentId(folderPath: String, marker: String): String? {
+    val remainder = folderPath.substringAfter(marker, missingDelimiterValue = "")
+    if (remainder.isBlank()) return null
+    return remainder
+        .substringBefore('/')
+        .substringBefore('?')
+        .substringBefore('#')
+        .takeIf { it.isNotBlank() }
+}
+
+private fun decodeUriComponent(value: String): String = runCatching {
+    URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+}.getOrDefault(value)
 
 internal fun editorStateFromPlanEntity(plan: PlanEntity): PlanEditorUiState {
     return PlanEditorUiState(
@@ -452,6 +511,7 @@ internal fun editorStateFromPlanEntity(plan: PlanEntity): PlanEditorUiState {
         useAlbumTemplating = plan.useAlbumTemplating,
         directoryTemplate = plan.directoryTemplate,
         filenamePattern = plan.filenamePattern,
+        progressNotificationEnabled = plan.progressNotificationEnabled,
         scheduleEnabled = plan.scheduleEnabled,
         scheduleTimeMinutes = normalizeScheduleMinutes(plan.scheduleTimeMinutes),
         scheduleFrequency = PlanScheduleFrequency.fromRaw(plan.scheduleFrequency),
@@ -480,6 +540,7 @@ internal fun planEntityFromEditorState(state: PlanEditorUiState): PlanEntity {
         directoryTemplate = if (isAlbum && state.useAlbumTemplating) state.directoryTemplate.trim() else "",
         filenamePattern = if (isAlbum && state.useAlbumTemplating) state.filenamePattern.trim() else "",
         enabled = state.enabled,
+        progressNotificationEnabled = state.progressNotificationEnabled,
         scheduleEnabled = state.scheduleEnabled,
         scheduleTimeMinutes = normalizeScheduleMinutes(state.scheduleTimeMinutes),
         scheduleFrequency = state.scheduleFrequency.name,
@@ -491,3 +552,6 @@ internal fun planEntityFromEditorState(state: PlanEditorUiState): PlanEntity {
 
 private const val FULL_DEVICE_PRESET = "FULL_DEVICE_SHARED_STORAGE"
 private const val PLAN_LIST_ERROR_MESSAGE = "Unable to load jobs. Check media permission or storage access."
+private const val CONTENT_URI_SCHEME = "content://"
+private const val TREE_MARKER = "/tree/"
+private const val DOCUMENT_MARKER = "/document/"

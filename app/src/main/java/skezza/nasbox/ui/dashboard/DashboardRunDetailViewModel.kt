@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -14,25 +16,31 @@ import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
+import skezza.nasbox.data.repository.ServerRepository
 import skezza.nasbox.domain.sync.RunPhase
 import skezza.nasbox.domain.sync.RunStatus
+import skezza.nasbox.ui.common.buildPlanDisplayInfoMap
 
 class DashboardRunDetailViewModel(
     private val runId: Long,
     planRepository: PlanRepository,
+    serverRepository: ServerRepository,
     runRepository: RunRepository,
     runLogRepository: RunLogRepository,
 ) : ViewModel() {
 
     val uiState: StateFlow<DashboardRunDetailUiState> = combine(
         planRepository.observePlans(),
+        serverRepository.observeServers(),
         runRepository.observeRun(runId),
         runLogRepository.observeLogsForRunNewest(runId, RUN_LOG_LIMIT),
-    ) { plans, run, logsNewest ->
+    ) { plans, servers, run, logsNewest ->
+        val planInfoById = buildPlanDisplayInfoMap(plans, servers)
         val planName = run?.let { current ->
-            plans.firstOrNull { it.planId == current.planId }?.name
-        } ?: run?.let { "Plan #${it.planId}" }
-        val mappedRun = run?.toSummary(planName.orEmpty())
+            planInfoById[current.planId]?.planName
+        } ?: run?.let { "Job #${it.planId}" }
+        val serverName = run?.let { planInfoById[it.planId]?.serverName }
+        val mappedRun = run?.toSummary(planName.orEmpty(), serverName)
         val isActive = run?.phase
             ?.trim()
             ?.uppercase(Locale.US)
@@ -61,9 +69,10 @@ class DashboardRunDetailViewModel(
         initialValue = DashboardRunDetailUiState(),
     )
 
-    private fun RunEntity.toSummary(planName: String): DashboardRunDetailSummary = DashboardRunDetailSummary(
+    private fun RunEntity.toSummary(planName: String, serverName: String?): DashboardRunDetailSummary = DashboardRunDetailSummary(
         runId = runId,
         planName = planName,
+        serverName = serverName,
         status = status,
         triggerSource = triggerSource,
         executionMode = executionMode,
@@ -147,12 +156,11 @@ class DashboardRunDetailViewModel(
         val candidate = logsNewest.firstOrNull { log ->
             log.message !in NOISY_MESSAGES
         } ?: return null
-        val label = when (candidate.message) {
-            MESSAGE_PROCESSING_ITEM -> "Processing ${extractDisplayLabel(candidate).ifBlank { "item" }}"
-            MESSAGE_UPLOADED_ITEM -> "Uploaded ${extractDisplayLabel(candidate).ifBlank { "item" }}"
-            MESSAGE_SKIPPED_ITEM -> "Skipped ${extractDisplayLabel(candidate).ifBlank { "item" }}"
-            MESSAGE_FINISHED -> statusLabelFromRunFinishedDetail(candidate.detail)
-            else -> candidate.message
+        val label = extractDisplayLabel(candidate).ifBlank {
+            when (candidate.message) {
+                MESSAGE_FINISHED -> statusLabelFromRunFinishedDetail(candidate.detail)
+                else -> candidate.message
+            }
         }
         return DashboardRunDetailLastAction(
             label = label,
@@ -228,7 +236,7 @@ class DashboardRunDetailViewModel(
                         displayName = displayName,
                         timestampEpochMs = log.timestampEpochMs,
                         status = DashboardRunFileStatus.SKIPPED,
-                        detail = extractReasonCode(log.detail) ?: "reason=already_backed_up",
+                        detail = extractReasonCode(log.detail) ?: formatReasonLabel(REASON_ALREADY_BACKED_UP),
                     )
                 }
 
@@ -302,12 +310,38 @@ class DashboardRunDetailViewModel(
         fallbackByMediaId: Map<String, String>,
     ): String {
         val remotePath = extractRemotePath(detail)
-        return extractFilename(extractDisplayName(detail))
-            ?: extractFilename(remotePath)
-            ?: mediaId?.let { fallbackByMediaId[it] }
-            ?: extractFilename(mediaId)
-            ?: mediaId
-            ?: ""
+        val detailDisplayName = extractFilename(extractDisplayName(detail))
+        if (!detailDisplayName.isNullOrBlank()) {
+            return appendExtensionIfMissing(detailDisplayName, remotePath)
+        }
+        val remoteName = extractFilename(remotePath)
+        if (!remoteName.isNullOrBlank()) return remoteName
+        val fallbackName = mediaId?.let { fallbackByMediaId[it] }
+        if (!fallbackName.isNullOrBlank()) return fallbackName
+        val mediaIdFilename = extractFilename(mediaId)
+        if (!mediaIdFilename.isNullOrBlank()) return mediaIdFilename
+        return mediaId.orEmpty()
+    }
+
+    private fun appendExtensionIfMissing(baseName: String, remotePath: String?): String {
+        if (hasExtension(baseName)) return baseName
+        val extension = extractExtension(remotePath)
+        if (extension.isNullOrBlank()) return baseName
+        val suffix = ".${extension}"
+        if (baseName.endsWith(suffix, ignoreCase = true)) return baseName
+        return "$baseName$suffix"
+    }
+
+    private fun hasExtension(value: String): Boolean {
+        val dotIndex = value.lastIndexOf('.')
+        return dotIndex > 0 && dotIndex < value.length - 1
+    }
+
+    private fun extractExtension(value: String?): String? {
+        val filename = extractFilename(value) ?: return null
+        val dotIndex = filename.lastIndexOf('.')
+        if (dotIndex <= 0 || dotIndex >= filename.length - 1) return null
+        return filename.substring(dotIndex + 1)
     }
 
     private fun extractMediaId(detail: String?): String? =
@@ -320,50 +354,123 @@ class DashboardRunDetailViewModel(
 
     private fun extractDisplayName(detail: String?): String? {
         val source = detail.orEmpty()
-        val value = source
+        val afterDisplayName = source
             .substringAfter("displayName=", missingDelimiterValue = "")
-            .substringBefore(" remotePath=", missingDelimiterValue = "")
+            .takeIf { it.isNotBlank() }
+            ?: return null
+        val value = afterDisplayName
+            .substringBefore(" remotePath=")
+            .substringBefore(" dest=")
             .trim()
         return value.takeIf { it.isNotBlank() }
     }
 
     private fun extractRemotePath(detail: String?): String? {
-        val value = detail.orEmpty()
-            .substringAfter("remotePath=", missingDelimiterValue = "")
-            .trim()
-        return value.takeIf { it.isNotBlank() }
+        return REMOTE_PATH_REGEX.find(detail.orEmpty())
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
     }
 
     private fun extractReasonCode(detail: String?): String? {
+        return parseReasonCode(detail)?.let { formatReasonLabel(it) }
+    }
+
+    private fun parseReasonCode(detail: String?): String? {
         val value = Regex("""reason=([^\s]+)""")
             .find(detail.orEmpty())
             ?.groupValues
             ?.getOrNull(1)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
-        return value?.let { "reason=$it" }
+            ?.trim('"', '\'')
+            ?.trimEnd(',', '.', ';', ')', ']')
+            ?.takeIf { it.isNotBlank() }
+        return value
     }
 
     private fun deriveFailureReasonCode(log: RunLogEntity): String {
-        extractReasonCode(log.detail)?.let { return it }
-        return when {
-            log.message.startsWith("Unable to read source item ", ignoreCase = true) -> "reason=source_unreadable"
-            log.message.startsWith("Upload failed for item ", ignoreCase = true) -> "reason=upload_failed"
+        parseReasonCode(log.detail)?.let { return formatReasonLabel(it) }
+        val reasonCode = when {
+            log.message.startsWith("Unable to read source item ", ignoreCase = true) -> REASON_SOURCE_UNREADABLE
+            log.message.startsWith("Upload failed for item ", ignoreCase = true) -> REASON_UPLOAD_FAILED
             log.message.startsWith("Uploaded item ", ignoreCase = true) &&
                 log.message.contains("failed to persist backup proof", ignoreCase = true) ->
-                "reason=backup_record_persist_failed"
-            else -> "reason=failed"
+                REASON_BACKUP_RECORD_PERSIST_FAILED
+            else -> REASON_FAILED
+        }
+        return formatReasonLabel(reasonCode)
+    }
+
+    private fun formatReasonLabel(reasonCode: String): String {
+        val normalized = reasonCode.trim().lowercase(Locale.US)
+        return when (normalized) {
+            REASON_ALREADY_BACKED_UP -> "Already backed up"
+            REASON_UPLOAD_FAILED -> "Upload failed"
+            REASON_SOURCE_UNREADABLE -> "Source unreadable"
+            REASON_BACKUP_RECORD_PERSIST_FAILED -> "Backup record persist failed"
+            REASON_FAILED -> "Failed"
+            else -> humanizeReasonCode(normalized)
+        }
+    }
+
+    private fun humanizeReasonCode(reasonCode: String): String {
+        val words = reasonCode
+            .replace('-', '_')
+            .split('_')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (words.isEmpty()) return reasonCode
+        val sentence = words.joinToString(" ")
+        return sentence.replaceFirstChar { first ->
+            if (first.isLowerCase()) {
+                first.titlecase(Locale.US)
+            } else {
+                first.toString()
+            }
         }
     }
 
     private fun extractFilename(value: String?): String? {
         val normalized = value?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        val withoutQuery = normalized.substringBefore('?')
-        val filename = withoutQuery
+        val withoutQuery = normalized
+            .substringBefore('?')
+            .substringBefore('#')
+        val normalizedPath = extractDocumentPathFromContentUri(withoutQuery)
+            ?: decodeUriComponent(withoutQuery)
+        val filename = normalizedPath
             .substringAfterLast('/')
             .substringAfterLast('\\')
+            .substringAfterLast(':')
             .trim()
         return filename.takeIf { it.isNotBlank() }
+    }
+
+    private fun extractDocumentPathFromContentUri(value: String): String? {
+        if (!value.startsWith(CONTENT_URI_SCHEME, ignoreCase = true)) return null
+        val encodedDocumentId = extractDocumentId(value, DOCUMENT_MARKER)
+            ?: extractDocumentId(value, TREE_MARKER)
+            ?: return null
+        val decodedDocumentId = decodeUriComponent(encodedDocumentId)
+        return decodedDocumentId.substringAfter(':', missingDelimiterValue = decodedDocumentId)
+    }
+
+    private fun extractDocumentId(value: String, marker: String): String? {
+        val remainder = value.substringAfter(marker, missingDelimiterValue = "")
+        if (remainder.isBlank()) return null
+        return remainder
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+            .takeIf { it.isNotBlank() }
+    }
+
+    private fun decodeUriComponent(value: String): String {
+        if (!value.contains('%')) return value
+        return runCatching {
+            URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+        }.getOrDefault(value)
     }
 
     private fun extractMediaIdFromMessage(message: String): String? {
@@ -388,6 +495,10 @@ class DashboardRunDetailViewModel(
     companion object {
         private const val RUN_LOG_LIMIT = 300
         private val NOISY_MESSAGES = setOf("Run progress")
+        private val REMOTE_PATH_REGEX = Regex("""(?:remotePath|dest)=([^\s]+)""")
+        private const val CONTENT_URI_SCHEME = "content://"
+        private const val DOCUMENT_MARKER = "/document/"
+        private const val TREE_MARKER = "/tree/"
 
         private const val MESSAGE_PROCESSING_ITEM = "Processing item"
         private const val MESSAGE_UPLOADED_ITEM = "Uploaded item"
@@ -402,9 +513,16 @@ class DashboardRunDetailViewModel(
         private const val MESSAGE_RESUMED_ATTEMPT_PREFIX = "Resumed attempt #"
         private const val MESSAGE_FINISHED = "Run finished"
 
+        private const val REASON_ALREADY_BACKED_UP = "already_backed_up"
+        private const val REASON_UPLOAD_FAILED = "upload_failed"
+        private const val REASON_SOURCE_UNREADABLE = "source_unreadable"
+        private const val REASON_BACKUP_RECORD_PERSIST_FAILED = "backup_record_persist_failed"
+        private const val REASON_FAILED = "failed"
+
         fun factory(
             runId: Long,
             planRepository: PlanRepository,
+            serverRepository: ServerRepository,
             runRepository: RunRepository,
             runLogRepository: RunLogRepository,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
@@ -414,6 +532,7 @@ class DashboardRunDetailViewModel(
                     return DashboardRunDetailViewModel(
                         runId = runId,
                         planRepository = planRepository,
+                        serverRepository = serverRepository,
                         runRepository = runRepository,
                         runLogRepository = runLogRepository,
                     ) as T
@@ -439,6 +558,7 @@ data class DashboardRunDetailUiState(
 data class DashboardRunDetailSummary(
     val runId: Long,
     val planName: String,
+    val serverName: String?,
     val status: String,
     val triggerSource: String,
     val executionMode: String,

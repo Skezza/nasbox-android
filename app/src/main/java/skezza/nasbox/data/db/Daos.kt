@@ -60,6 +60,12 @@ interface RunDao {
     @Update
     suspend fun update(run: RunEntity)
 
+    @Query("DELETE FROM runs WHERE run_id = :runId")
+    suspend fun deleteById(runId: Long)
+
+    @Query("DELETE FROM runs WHERE run_id IN (:runIds)")
+    suspend fun deleteByIds(runIds: List<Long>)
+
     @Query("SELECT * FROM runs WHERE plan_id = :planId ORDER BY started_at_epoch_ms DESC")
     fun observeForPlan(planId: Long): Flow<List<RunEntity>>
 

@@ -12,17 +12,20 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
-import skezza.nasbox.data.db.PlanEntity
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
+import skezza.nasbox.data.repository.ServerRepository
+import skezza.nasbox.ui.common.PlanDisplayInfo
+import skezza.nasbox.ui.common.buildPlanDisplayInfoMap
 import skezza.nasbox.domain.sync.RunStatus
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AuditViewModel(
     private val planRepository: PlanRepository,
+    private val serverRepository: ServerRepository,
     private val runRepository: RunRepository,
     private val runLogRepository: RunLogRepository,
 ) : ViewModel() {
@@ -32,13 +35,13 @@ class AuditViewModel(
 
     val listUiState: StateFlow<AuditListUiState> = combine(
         planRepository.observePlans(),
+        serverRepository.observeServers(),
         runRepository.observeLatestRuns(RUN_LIST_LIMIT),
-        runLogRepository.observeLatestTimeline(PHASE_TRANSITIONS_SCAN_LIMIT),
         selectedFilter,
-    ) { plans, runs, timelineRows, filter ->
-        val planNamesById = plans.associateBy(PlanEntity::planId, PlanEntity::name)
+    ) { plans, servers, runs, filter ->
+        val planInfoById = buildPlanDisplayInfoMap(plans, servers)
         val mapped = runs.map { run ->
-            run.toListItem(planNamesById[run.planId] ?: "Plan #${run.planId}")
+            run.toListItem(planInfoById[run.planId])
         }
         val filtered = mapped.filter { item ->
             when (filter) {
@@ -55,28 +58,6 @@ class AuditViewModel(
         AuditListUiState(
             selectedFilter = filter,
             runs = filtered,
-            phaseTransitions = timelineRows
-                .asSequence()
-                .filter { row ->
-                    row.message == MESSAGE_RUN_STARTED ||
-                        row.message == MESSAGE_RUN_FINISHED ||
-                        row.message == MESSAGE_CHUNK_PAUSED ||
-                        row.message == MESSAGE_INTERRUPTED ||
-                        row.message == MESSAGE_FINALIZED_CANCELED ||
-                        row.message == MESSAGE_FOREGROUND_BLOCKED ||
-                        row.message.startsWith(MESSAGE_RESUMED_PREFIX)
-                }
-                .take(PHASE_TRANSITIONS_LIMIT)
-                .map { row ->
-                    AuditPhaseTransition(
-                        runId = row.runId,
-                        planName = planNamesById[row.planId] ?: "Plan #${row.planId}",
-                        timestampEpochMs = row.timestampEpochMs,
-                        message = row.message,
-                        detail = row.detail,
-                    )
-                }
-                .toList(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -90,15 +71,15 @@ class AuditViewModel(
         } else {
             combine(
                 planRepository.observePlans(),
+                serverRepository.observeServers(),
                 runRepository.observeRun(runId),
                 runLogRepository.observeLogsForRunNewest(runId, RUN_LOG_LIMIT),
-            ) { plans, run, logs ->
-                val planName = run?.let { current ->
-                    plans.firstOrNull { it.planId == current.planId }?.name
-                } ?: run?.let { "Plan #${it.planId}" }
+            ) { plans, servers, run, logs ->
+                val planInfoById = buildPlanDisplayInfoMap(plans, servers)
+                val planInfo = run?.let { planInfoById[it.planId] }
 
                 AuditDetailUiState(
-                    run = run?.toDetailSummary(planName.orEmpty()),
+                    run = run?.toDetailSummary(planInfo),
                     logs = logs.map { it.toDetailItem() },
                 )
             }
@@ -117,9 +98,10 @@ class AuditViewModel(
         selectedRunId.value = runId
     }
 
-    private fun RunEntity.toListItem(planName: String): AuditRunListItem = AuditRunListItem(
+    private fun RunEntity.toListItem(planInfo: PlanDisplayInfo?): AuditRunListItem = AuditRunListItem(
         runId = runId,
-        planName = planName,
+        planName = planInfo?.planName ?: "Job #$planId",
+        serverName = planInfo?.serverName,
         status = status,
         triggerSource = triggerSource,
         executionMode = executionMode,
@@ -132,9 +114,10 @@ class AuditViewModel(
         summaryError = summaryError,
     )
 
-    private fun RunEntity.toDetailSummary(planName: String): AuditRunSummary = AuditRunSummary(
+    private fun RunEntity.toDetailSummary(planInfo: PlanDisplayInfo?): AuditRunSummary = AuditRunSummary(
         runId = runId,
-        planName = planName,
+        planName = planInfo?.planName ?: "Job #$planId",
+        serverName = planInfo?.serverName,
         status = status,
         triggerSource = triggerSource,
         executionMode = executionMode,
@@ -158,25 +141,22 @@ class AuditViewModel(
     companion object {
         private const val RUN_LIST_LIMIT = 200
         private const val RUN_LOG_LIMIT = 300
-        private const val PHASE_TRANSITIONS_SCAN_LIMIT = 120
-        private const val PHASE_TRANSITIONS_LIMIT = 20
-        private const val MESSAGE_RUN_STARTED = "Run started"
-        private const val MESSAGE_RUN_FINISHED = "Run finished"
-        private const val MESSAGE_CHUNK_PAUSED = "Chunk paused for system window"
-        private const val MESSAGE_INTERRUPTED = "Run marked as interrupted"
-        private const val MESSAGE_FINALIZED_CANCELED = "Run finalized as canceled"
-        private const val MESSAGE_FOREGROUND_BLOCKED = "Foreground start blocked"
-        private const val MESSAGE_RESUMED_PREFIX = "Resumed attempt #"
 
         fun factory(
             planRepository: PlanRepository,
+            serverRepository: ServerRepository,
             runRepository: RunRepository,
             runLogRepository: RunLogRepository,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(AuditViewModel::class.java)) {
                     @Suppress("UNCHECKED_CAST")
-                    return AuditViewModel(planRepository, runRepository, runLogRepository) as T
+                    return AuditViewModel(
+                        planRepository,
+                        serverRepository,
+                        runRepository,
+                        runLogRepository,
+                    ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }
@@ -199,12 +179,12 @@ enum class AuditFilter {
 data class AuditListUiState(
     val selectedFilter: AuditFilter = AuditFilter.ALL,
     val runs: List<AuditRunListItem> = emptyList(),
-    val phaseTransitions: List<AuditPhaseTransition> = emptyList(),
 )
 
 data class AuditRunListItem(
     val runId: Long,
     val planName: String,
+    val serverName: String?,
     val status: String,
     val triggerSource: String,
     val executionMode: String,
@@ -225,6 +205,7 @@ data class AuditDetailUiState(
 data class AuditRunSummary(
     val runId: Long,
     val planName: String,
+    val serverName: String?,
     val status: String,
     val triggerSource: String,
     val executionMode: String,
@@ -241,14 +222,6 @@ data class AuditLogItem(
     val logId: Long,
     val timestampEpochMs: Long,
     val severity: String,
-    val message: String,
-    val detail: String?,
-)
-
-data class AuditPhaseTransition(
-    val runId: Long,
-    val planName: String,
-    val timestampEpochMs: Long,
     val message: String,
     val detail: String?,
 )

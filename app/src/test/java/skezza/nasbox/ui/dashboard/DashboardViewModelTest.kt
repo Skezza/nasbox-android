@@ -7,9 +7,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -26,6 +28,7 @@ import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
 import skezza.nasbox.data.repository.ServerRepository
 import skezza.nasbox.domain.sync.ReconcileStaleActiveRunsUseCase
+import skezza.nasbox.domain.sync.RunContinuationScheduler
 import skezza.nasbox.domain.sync.RunStatus
 import skezza.nasbox.domain.sync.StopRunUseCase
 import skezza.nasbox.ui.common.LoadState
@@ -43,6 +46,8 @@ class DashboardViewModelTest {
 
         val state = harness.viewModel.uiState.value
         assertEquals(VaultHealthLevel.NOT_CONFIGURED, state.vaultHealth.level)
+        assertEquals("No jobs have run yet", state.runHealth.title)
+        assertEquals("Run a backup to start archiving files.", state.runHealth.detail)
         assertTrue(state.currentRuns.isEmpty())
         assertTrue(state.recentRuns.isEmpty())
     }
@@ -92,6 +97,250 @@ class DashboardViewModelTest {
             "Unable to load dashboard data. Check your network or SMB configuration.",
             state.errorMessage,
         )
+    }
+
+    @Test
+    fun runHealth_withConsecutiveFailures_isCritical() = runTest {
+        val plans = MutableStateFlow(
+            listOf(
+                PlanEntity(
+                    planId = 11,
+                    name = "Camera Job",
+                    sourceAlbum = "album",
+                    serverId = 21,
+                    directoryTemplate = "",
+                    filenamePattern = "",
+                    enabled = true,
+                ),
+            ),
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 101,
+                    planId = 11,
+                    status = RunStatus.FAILED,
+                    startedAtEpochMs = 30_000L,
+                    finishedAtEpochMs = 30_500L,
+                    summaryError = "Timeout",
+                ),
+                RunEntity(
+                    runId = 100,
+                    planId = 11,
+                    status = RunStatus.FAILED,
+                    startedAtEpochMs = 20_000L,
+                    finishedAtEpochMs = 20_400L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = plans,
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        val runHealth = harness.viewModel.uiState.value.runHealth
+        assertEquals(RunHealthLevel.CRITICAL, runHealth.level)
+        assertEquals("Critical", runHealth.title)
+        assertEquals(2, runHealth.recentFailureCount)
+        assertEquals(2, runHealth.totalObservedRuns)
+        assertEquals("2 of 2 runs failed.", runHealth.detail)
+        assertEquals(1, runHealth.issues.size)
+        assertEquals(101, runHealth.issues.first().runId)
+        assertEquals(2, runHealth.issues.first().streakLength)
+    }
+
+    @Test
+    fun runHealth_withSingleFailure_isWarning() = runTest {
+        val plans = MutableStateFlow(
+            listOf(
+                PlanEntity(
+                    planId = 11,
+                    name = "Camera Job",
+                    sourceAlbum = "album",
+                    serverId = 21,
+                    directoryTemplate = "",
+                    filenamePattern = "",
+                    enabled = true,
+                ),
+            ),
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 202,
+                    planId = 11,
+                    status = RunStatus.PARTIAL,
+                    startedAtEpochMs = 40_000L,
+                    finishedAtEpochMs = 40_800L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = plans,
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        val runHealth = harness.viewModel.uiState.value.runHealth
+        assertEquals(RunHealthLevel.WARNING, runHealth.level)
+        assertEquals("Warning", runHealth.title)
+        assertEquals(1, runHealth.recentFailureCount)
+        assertEquals(1, runHealth.totalObservedRuns)
+        assertEquals("1 of 1 runs failed.", runHealth.detail)
+        assertEquals(1, runHealth.issues.size)
+        assertEquals(1, runHealth.issues.first().streakLength)
+        assertNull(runHealth.lastSuccessAtEpochMs)
+    }
+
+    @Test
+    fun runHealth_withAllSuccess_isHealthy() = runTest {
+        val plans = MutableStateFlow(
+            listOf(
+                PlanEntity(
+                    planId = 11,
+                    name = "Camera Job",
+                    sourceAlbum = "album",
+                    serverId = 21,
+                    directoryTemplate = "",
+                    filenamePattern = "",
+                    enabled = true,
+                ),
+            ),
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 303,
+                    planId = 11,
+                    status = RunStatus.SUCCESS,
+                    startedAtEpochMs = 50_000L,
+                    finishedAtEpochMs = 50_300L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = plans,
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        val runHealth = harness.viewModel.uiState.value.runHealth
+        assertEquals(RunHealthLevel.HEALTHY, runHealth.level)
+        assertEquals("Good", runHealth.title)
+        assertEquals(0, runHealth.recentFailureCount)
+        assertEquals(1, runHealth.totalObservedRuns)
+        assertEquals("All recent runs succeeded.", runHealth.detail)
+        assertNotNull(runHealth.lastSuccessAtEpochMs)
+        assertTrue(runHealth.issues.isEmpty())
+    }
+
+    @Test
+    fun runHealth_withResolvedFailure_isHealthy() = runTest {
+        val plans = MutableStateFlow(
+            listOf(
+                PlanEntity(
+                    planId = 11,
+                    name = "Camera Job",
+                    sourceAlbum = "album",
+                    serverId = 21,
+                    directoryTemplate = "",
+                    filenamePattern = "",
+                    enabled = true,
+                ),
+            ),
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 403,
+                    planId = 11,
+                    status = RunStatus.SUCCESS,
+                    startedAtEpochMs = 60_000L,
+                    finishedAtEpochMs = 60_400L,
+                ),
+                RunEntity(
+                    runId = 402,
+                    planId = 11,
+                    status = RunStatus.FAILED,
+                    startedAtEpochMs = 55_000L,
+                    finishedAtEpochMs = 55_300L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = plans,
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        val runHealth = harness.viewModel.uiState.value.runHealth
+        assertEquals(RunHealthLevel.HEALTHY, runHealth.level)
+        assertEquals("Good", runHealth.title)
+        assertEquals(0, runHealth.recentFailureCount)
+        assertEquals(1, runHealth.totalObservedRuns)
+        assertNotNull(runHealth.lastSuccessAtEpochMs)
+        assertTrue(runHealth.issues.isEmpty())
+        assertEquals("All recent runs succeeded.", runHealth.detail)
+    }
+
+    @Test
+    fun runHealth_withCanceledRun_isWarning() = runTest {
+        val plans = MutableStateFlow(
+            listOf(
+                PlanEntity(
+                    planId = 11,
+                    name = "Camera Job",
+                    sourceAlbum = "album",
+                    serverId = 21,
+                    directoryTemplate = "",
+                    filenamePattern = "",
+                    enabled = true,
+                ),
+            ),
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 414,
+                    planId = 11,
+                    status = RunStatus.CANCELED,
+                    startedAtEpochMs = 70_000L,
+                    finishedAtEpochMs = 70_200L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = plans,
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        val runHealth = harness.viewModel.uiState.value.runHealth
+        assertEquals(RunHealthLevel.WARNING, runHealth.level)
+        assertEquals("Warning", runHealth.title)
+        assertEquals(1, runHealth.recentFailureCount)
+        assertEquals(1, runHealth.totalObservedRuns)
+        assertNull(runHealth.lastSuccessAtEpochMs)
+        assertTrue(runHealth.issues.isEmpty())
+        assertEquals("1 of 1 runs failed.", runHealth.detail)
+    }
+
+    @Test
+    fun restartRun_enqueuesContinuation() = runTest {
+        val scheduler = FakeRunContinuationScheduler()
+        val harness = buildHarness(runContinuationScheduler = scheduler)
+
+        harness.viewModel.restartRun(planId = 13, runId = 55, continuationCursor = "cursor-123")
+        advanceUntilIdle()
+
+        assertEquals(1, scheduler.requests.size)
+        assertEquals(Triple(13L, 55L, "cursor-123"), scheduler.requests.first())
     }
 
     @Test
@@ -222,6 +471,87 @@ class DashboardViewModelTest {
         assertEquals(1, nextRun?.additionalScheduledPlans)
     }
 
+    @Test
+    fun clearRecentRun_removesEntryFromUiState() = runTest {
+        val plan = PlanEntity(
+            planId = 11,
+            name = "Camera Job",
+            sourceAlbum = "album",
+            serverId = 21,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 501,
+                    planId = 11,
+                    status = RunStatus.SUCCESS,
+                    startedAtEpochMs = 1_000L,
+                    finishedAtEpochMs = 1_050L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = MutableStateFlow(listOf(plan)),
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        assertEquals(1, harness.viewModel.uiState.value.recentRuns.size)
+
+        harness.viewModel.clearRecentRun(501)
+        advanceUntilIdle()
+
+        assertTrue(harness.viewModel.uiState.value.recentRuns.isEmpty())
+    }
+
+    @Test
+    fun clearAllRecentRuns_clearsAllEntries() = runTest {
+        val plan = PlanEntity(
+            planId = 11,
+            name = "Camera Job",
+            sourceAlbum = "album",
+            serverId = 21,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+        )
+        val runs = MutableStateFlow(
+            listOf(
+                RunEntity(
+                    runId = 601,
+                    planId = 11,
+                    status = RunStatus.SUCCESS,
+                    startedAtEpochMs = 1_500L,
+                    finishedAtEpochMs = 1_550L,
+                ),
+                RunEntity(
+                    runId = 602,
+                    planId = 11,
+                    status = RunStatus.SUCCESS,
+                    startedAtEpochMs = 1_600L,
+                    finishedAtEpochMs = 1_650L,
+                ),
+            ),
+        )
+        val harness = buildHarness(
+            plans = MutableStateFlow(listOf(plan)),
+            servers = MutableStateFlow(listOf(server(21))),
+            runs = runs,
+        )
+        advanceUntilIdle()
+
+        assertEquals(2, harness.viewModel.uiState.value.recentRuns.size)
+
+        harness.viewModel.clearAllRecentRuns()
+        advanceUntilIdle()
+
+        assertTrue(harness.viewModel.uiState.value.recentRuns.isEmpty())
+    }
+
     private fun buildHarness(
         plans: MutableStateFlow<List<PlanEntity>> = MutableStateFlow(emptyList()),
         planRepository: PlanRepository = FakePlanRepository(plans),
@@ -229,6 +559,7 @@ class DashboardViewModelTest {
         runs: MutableStateFlow<List<RunEntity>> = MutableStateFlow(emptyList()),
         recurrenceCalculator: PlanRecurrenceCalculator = PlanRecurrenceCalculator(TimeZone.getTimeZone("UTC")),
         nowEpochMs: () -> Long = { 1_000_000L },
+        runContinuationScheduler: FakeRunContinuationScheduler = FakeRunContinuationScheduler(),
     ): Harness {
         val runRepository = FakeRunRepository(runs)
         val runLogRepository = FakeRunLogRepository()
@@ -250,11 +581,13 @@ class DashboardViewModelTest {
             ),
             recurrenceCalculator = recurrenceCalculator,
             nowEpochMs = nowEpochMs,
+            runContinuationScheduler = runContinuationScheduler,
         )
         return Harness(
             viewModel = viewModel,
             runRepository = runRepository,
             logRepository = runLogRepository,
+            runContinuationScheduler = runContinuationScheduler,
         )
     }
 
@@ -297,6 +630,7 @@ class DashboardViewModelTest {
         val viewModel: DashboardViewModel,
         val runRepository: FakeRunRepository,
         val logRepository: FakeRunLogRepository,
+        val runContinuationScheduler: FakeRunContinuationScheduler,
     )
 
     private class FakePlanRepository(
@@ -331,20 +665,20 @@ class DashboardViewModelTest {
         private val runs: MutableStateFlow<List<RunEntity>>,
     ) : RunRepository {
         override fun observeRunsForPlan(planId: Long): Flow<List<RunEntity>> =
-            MutableStateFlow(runs.value.filter { it.planId == planId })
+            runs.map { state -> state.filter { it.planId == planId } }
 
-        override fun observeLatestRun(): Flow<RunEntity?> = MutableStateFlow(runs.value.maxByOrNull { it.startedAtEpochMs })
+        override fun observeLatestRun(): Flow<RunEntity?> = runs.map { it.maxByOrNull { it.startedAtEpochMs } }
 
         override fun observeLatestRuns(limit: Int): Flow<List<RunEntity>> = runs
 
         override fun observeLatestRunsByStatuses(limit: Int, statuses: Set<String>): Flow<List<RunEntity>> {
             val normalized = statuses.map { it.trim().uppercase() }.toSet()
-            return MutableStateFlow(
-                runs.value
+            return runs.map { state ->
+                state
                     .filter { it.status.trim().uppercase() in normalized }
                     .sortedByDescending { it.startedAtEpochMs }
-                    .take(limit),
-            )
+                    .take(limit)
+            }
         }
 
         override fun observeRunsByStatus(status: String): Flow<List<RunEntity>> =
@@ -380,9 +714,19 @@ class DashboardViewModelTest {
                 .sortedByDescending { it.startedAtEpochMs }
                 .take(limit)
         }
+
+        override suspend fun deleteRun(runId: Long) {
+            runs.value = runs.value.filterNot { it.runId == runId }
+        }
+
+        override suspend fun deleteRuns(runIds: List<Long>) {
+            if (runIds.isEmpty()) return
+            val ids = runIds.toSet()
+            runs.value = runs.value.filterNot { it.runId in ids }
+        }
     }
 
-    private class FakeRunLogRepository : RunLogRepository {
+private class FakeRunLogRepository : RunLogRepository {
         val logs = mutableListOf<RunLogEntity>()
 
         override suspend fun createLog(log: RunLogEntity): Long {
@@ -397,5 +741,13 @@ class DashboardViewModelTest {
         )
 
         override fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>> = flowOf(emptyList())
+    }
+
+    private class FakeRunContinuationScheduler : RunContinuationScheduler {
+        val requests = mutableListOf<Triple<Long, Long, String>>()
+
+        override suspend fun enqueueContinuation(planId: Long, runId: Long, continuationCursor: String) {
+            requests += Triple(planId, runId, continuationCursor)
+        }
     }
 }

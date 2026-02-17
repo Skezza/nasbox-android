@@ -68,6 +68,14 @@ object DatabaseProvider {
         }
     }
 
+    private val migration7To8 = object : Migration(7, 8) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL(
+                "ALTER TABLE plans ADD COLUMN progress_notification_enabled INTEGER NOT NULL DEFAULT 1",
+            )
+        }
+    }
+
     fun get(context: Context): NasBoxDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
@@ -81,6 +89,7 @@ object DatabaseProvider {
                 migration4To5,
                 migration5To6,
                 migration6To7,
+                migration7To8,
             )
                 .build().also { instance = it }
         }

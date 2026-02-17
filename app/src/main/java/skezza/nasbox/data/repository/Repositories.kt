@@ -86,6 +86,8 @@ interface RunRepository {
     suspend fun runsByStatus(status: String): List<RunEntity>
     suspend fun latestRuns(limit: Int): List<RunEntity>
     suspend fun latestRunsByStatuses(limit: Int, statuses: Set<String>): List<RunEntity>
+    suspend fun deleteRun(runId: Long) {}
+    suspend fun deleteRuns(runIds: List<Long>) {}
 }
 
 class DefaultRunRepository(
@@ -116,6 +118,13 @@ class DefaultRunRepository(
 
     override suspend fun latestRunsByStatuses(limit: Int, statuses: Set<String>): List<RunEntity> =
         runDao.getLatestByStatuses(limit, statuses.toList())
+
+    override suspend fun deleteRun(runId: Long) = runDao.deleteById(runId)
+
+    override suspend fun deleteRuns(runIds: List<Long>) {
+        if (runIds.isEmpty()) return
+        runDao.deleteByIds(runIds)
+    }
 }
 
 interface RunLogRepository {

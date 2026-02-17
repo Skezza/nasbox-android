@@ -8,6 +8,7 @@ import skezza.nasbox.data.repository.RunRepository
 class StopRunUseCase(
     private val runRepository: RunRepository,
     private val runLogRepository: RunLogRepository,
+    private val cancelQueuedPlanRunWork: suspend (Long) -> Unit = {},
     private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
 ) {
 
@@ -17,7 +18,10 @@ class StopRunUseCase(
         return when (normalizedStatus) {
             RunStatus.CANCEL_REQUESTED,
             RunStatus.CANCELED,
-            -> StopRunResult.AlreadyRequested
+            -> {
+                clearQueuedPlanWork(run.planId)
+                StopRunResult.AlreadyRequested
+            }
             RunStatus.RUNNING -> {
                 val now = nowEpochMs()
                 runRepository.updateRun(
@@ -40,10 +44,17 @@ class StopRunUseCase(
                         detail = "User requested stop from dashboard.",
                     ),
                 )
+                clearQueuedPlanWork(run.planId)
                 StopRunResult.Requested
             }
 
             else -> StopRunResult.NotActive
+        }
+    }
+
+    private suspend fun clearQueuedPlanWork(planId: Long) {
+        runCatching {
+            cancelQueuedPlanRunWork(planId)
         }
     }
 

@@ -1,5 +1,6 @@
 package skezza.nasbox.ui.audit
 
+import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -12,6 +13,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -22,20 +26,25 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import skezza.nasbox.domain.sync.RunExecutionMode
 import skezza.nasbox.domain.sync.RunPhase
 import skezza.nasbox.domain.sync.RunStatus
+import skezza.nasbox.ui.common.runTitleLabel
+import skezza.nasbox.ui.common.shouldHideEnumStatusLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,12 +81,8 @@ fun AuditScreen(
                 onSelected = viewModel::setFilter,
             )
 
-            if (state.phaseTransitions.isNotEmpty()) {
-                PhaseTransitionsCard(transitions = state.phaseTransitions, onOpenRun = onOpenRun)
-            }
-
             if (state.runs.isEmpty()) {
-                Text("No runs match this filter.")
+                Text("No runs match that filter.")
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(state.runs, key = { it.runId }) { run ->
@@ -92,13 +97,26 @@ fun AuditScreen(
                                     .padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
+                                val runStatusText = statusLabel(run.status, run.phase, run.executionMode)
+                                val hideRunStatusText = shouldHideEnumStatusLabel(
+                                    status = run.status,
+                                    statusLabel = runStatusText,
+                                    summaryError = run.summaryError,
+                                )
                                 Text(
-                                    "${run.planName} - ${statusLabel(run.status, run.phase, run.executionMode)} (${modeBadge(run.triggerSource, run.executionMode)})",
+                                    runTitleLabel(run.serverName, run.planName, run.triggerSource),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                 )
+                                if (!hideRunStatusText) {
+                                    Text(
+                                        runStatusText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                                 Text(
-                                    "Uploaded ${run.uploadedCount}, skipped ${run.skippedCount}, failed ${run.failedCount}",
+                                    "Uploaded ${run.uploadedCount} · Skipped ${run.skippedCount} · Failed ${run.failedCount}",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 Text(
@@ -125,52 +143,6 @@ fun AuditScreen(
     }
 }
 
-@Composable
-private fun PhaseTransitionsCard(
-    transitions: List<AuditPhaseTransition>,
-    onOpenRun: (Long) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("Debug: phase transitions (last 20)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            transitions.forEach { transition ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenRun(transition.runId) }
-                        .padding(vertical = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        "${transition.planName} - ${transition.message}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "${formatTimestamp(transition.timestampEpochMs)} (run #${transition.runId})",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    transition.detail?.takeIf { it.isNotBlank() }?.let { detail ->
-                        Text(
-                            detail,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuditRunDetailScreen(
@@ -180,7 +152,9 @@ fun AuditRunDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.detailUiState.collectAsState()
-    val expandedLogs = remember { mutableStateMapOf<Long, Boolean>() }
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val rawLogText = remember(state.logs) { buildRawAuditLogText(state.logs) }
 
     LaunchedEffect(runId) {
         viewModel.selectRun(runId)
@@ -189,108 +163,89 @@ fun AuditRunDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Run Detail") },
+                title = { Text("Run audit") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (state.run != null && rawLogText.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(rawLogText))
+                                Toast.makeText(context, "Log copied", Toast.LENGTH_SHORT).show()
+                            },
+                        ) {
+                            Text("Copy log")
+                        }
                     }
                 },
             )
         },
         modifier = modifier,
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            val run = state.run
-            if (run == null) {
-                item { Text("Run not found.") }
-            } else {
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                "${run.planName} - ${statusLabel(run.status, run.phase, run.executionMode)} (${modeBadge(run.triggerSource, run.executionMode)})",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                "Uploaded ${run.uploadedCount}, skipped ${run.skippedCount}, failed ${run.failedCount}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            Text(
-                                "Started ${formatTimestamp(run.startedAtEpochMs)}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            run.finishedAtEpochMs?.let {
-                                Text("Finished ${formatTimestamp(it)}", style = MaterialTheme.typography.bodySmall)
-                            }
-                            run.summaryError?.takeIf { it.isNotBlank() }?.let {
-                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                }
-
-                if (state.logs.isEmpty()) {
-                    item { Text("No log events recorded.") }
+        val run = state.run
+        if (run == null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp),
+            ) {
+                Text("Run not found")
+            }
+        } else {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    runTitleLabel(run.serverName, run.planName, run.triggerSource),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    statusLabel(run.status, run.phase, run.executionMode),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (rawLogText.isBlank()) {
+                    Text("No log events recorded.", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    items(state.logs, key = { it.logId }) { log ->
-                        val expanded = expandedLogs[log.logId] == true
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    expandedLogs[log.logId] = !expanded
-                                },
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        formatTimestamp(log.timestampEpochMs),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    val severityColor = if (log.severity.equals("ERROR", ignoreCase = true)) {
-                                        MaterialTheme.colorScheme.error
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                    Text(log.severity, style = MaterialTheme.typography.labelSmall, color = severityColor)
-                                }
-                                Text(log.message, style = MaterialTheme.typography.bodyMedium)
-                                val detail = log.detail?.trim().orEmpty()
-                                if (detail.isNotEmpty()) {
-                                    Text(
-                                        text = detail,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = if (expanded) Int.MAX_VALUE else 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
+                    SelectionContainer {
+                        Text(
+                            text = rawLogText,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        )
                     }
                 }
             }
         }
     }
 }
+
+private fun buildRawAuditLogText(logs: List<AuditLogItem>): String =
+    logs.sortedBy { it.timestampEpochMs }
+        .joinToString(separator = "\n") { log ->
+            buildString {
+                append(formatTimestamp(log.timestampEpochMs))
+                append("  ")
+                append(log.severity)
+                append("  ")
+                append(log.message)
+                val detail = log.detail?.trim().orEmpty()
+                if (detail.isNotEmpty()) {
+                    append('\n')
+                    append(detail)
+                }
+            }
+        }
 
 @Composable
 private fun FilterRow(
@@ -354,9 +309,9 @@ private fun statusLabel(
             RunPhase.WAITING_RETRY -> "Waiting for background window"
             RunPhase.FINISHING -> "Finishing"
             else -> if (normalizedMode == RunExecutionMode.BACKGROUND) {
-                "Running (background)"
+                "Running (scheduled)"
             } else {
-                "Running (manual foreground)"
+                "Running (manual)"
             }
         }
     }
@@ -370,11 +325,6 @@ private fun statusLabel(
         else -> status
     }
 }
-
-private fun modeBadge(
-    triggerSource: String,
-    executionMode: String,
-): String = "${triggerSource.lowercase(Locale.US)}/${executionMode.lowercase(Locale.US)}"
 
 private fun formatTimestamp(epochMs: Long): String =
     SimpleDateFormat("MMM d, HH:mm:ss", Locale.US).format(Date(epochMs))

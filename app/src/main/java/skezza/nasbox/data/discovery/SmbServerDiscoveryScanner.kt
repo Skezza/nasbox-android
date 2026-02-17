@@ -5,6 +5,7 @@ import android.net.wifi.WifiManager
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
@@ -12,12 +13,21 @@ import java.net.Socket
 import java.util.Collections
 import javax.jmdns.JmDNS
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
 
 data class DiscoveredSmbServer(
     val host: String,
@@ -25,85 +35,135 @@ data class DiscoveredSmbServer(
 )
 
 interface SmbServerDiscoveryScanner {
-    suspend fun discover(): List<DiscoveredSmbServer>
+    fun discover(): Flow<List<DiscoveredSmbServer>>
 }
 
 class AndroidSmbServerDiscoveryScanner(
     private val context: Context,
 ) : SmbServerDiscoveryScanner {
 
-    override suspend fun discover(): List<DiscoveredSmbServer> = withContext(Dispatchers.IO) {
-        val local = localIPv4Address()
-        val subnetTargets = subnetTargets(local)
-        val reachableByIp = scanTargets(subnetTargets)
-        val mdnsDiscovered = discoverViaMdns(local)
-        val fallbackHostnames = probeCommonLocalHostnames()
-
-        mergeDiscoveryResults(
-            ipResults = reachableByIp,
-            mdnsResults = mdnsDiscovered,
-            fallbackResults = fallbackHostnames,
-        )
-    }
-
-    private fun mergeDiscoveryResults(
-        ipResults: List<DiscoveredSmbServer>,
-        mdnsResults: List<DiscoveredSmbServer>,
-        fallbackResults: List<DiscoveredSmbServer>,
-    ): List<DiscoveredSmbServer> {
+    override fun discover(): Flow<List<DiscoveredSmbServer>> = channelFlow {
         val mergedByIp = linkedMapOf<String, DiscoveredSmbServer>()
+        val pendingIpOnlyByIp = mutableMapOf<String, DiscoveredSmbServer>()
+        val pendingIpOnlyEmitJobs = mutableMapOf<String, Job>()
+        val stateLock = Mutex()
+        var lastEmitted: List<DiscoveredSmbServer>? = null
 
-        fun mergeEntry(candidate: DiscoveredSmbServer) {
-            val existing = mergedByIp[candidate.ipAddress]
-            if (existing == null) {
-                mergedByIp[candidate.ipAddress] = candidate
-                return
+        suspend fun emitSnapshotIfChanged(force: Boolean = false) {
+            val snapshotToEmit = stateLock.withLock {
+                val snapshot = mergedByIp.values.sortedBy { it.host }
+                if (!force && snapshot == lastEmitted) {
+                    null
+                } else {
+                    lastEmitted = snapshot
+                    snapshot
+                }
+            } ?: return
+            send(snapshotToEmit)
+        }
+
+        suspend fun emitPendingIpOnly(ipAddress: String) {
+            val changed = stateLock.withLock {
+                pendingIpOnlyEmitJobs.remove(ipAddress)
+                val pending = pendingIpOnlyByIp.remove(ipAddress) ?: return@withLock false
+                mergeEntry(mergedByIp, pending)
             }
-
-            val existingIsIp = existing.host.equals(existing.ipAddress, ignoreCase = true)
-            val candidateIsIp = candidate.host.equals(candidate.ipAddress, ignoreCase = true)
-
-            val shouldReplace = when {
-                existingIsIp && !candidateIsIp -> true
-                !existingIsIp && candidateIsIp -> false
-                !existing.host.endsWith(".local", ignoreCase = true) &&
-                    candidate.host.endsWith(".local", ignoreCase = true) -> true
-                else -> false
-            }
-
-            if (shouldReplace) {
-                mergedByIp[candidate.ipAddress] = candidate
+            if (changed) {
+                emitSnapshotIfChanged()
             }
         }
 
-        ipResults.forEach(::mergeEntry)
-        mdnsResults.forEach(::mergeEntry)
-        fallbackResults.forEach(::mergeEntry)
+        val localIpv4 = localIPv4Address()
+        val localIp = localIpv4?.hostAddress
+        val subnetTargets = subnetTargets(localIpv4)
+        val mdnsBindings = localMdnsBindingAddresses()
+        merge(
+            scanTargets(subnetTargets, localIp),
+            discoverViaMdns(mdnsBindings),
+            probeCommonLocalHostnamesFlow(),
+        ).collect { candidate ->
+            val isIpOnly = candidate.host.equals(candidate.ipAddress, ignoreCase = true)
+            if (isIpOnly) {
+                val queued = stateLock.withLock {
+                    if (mergedByIp.containsKey(candidate.ipAddress)) {
+                        false
+                    } else {
+                        pendingIpOnlyByIp[candidate.ipAddress] = candidate
+                        pendingIpOnlyEmitJobs.remove(candidate.ipAddress)?.cancel()
+                        pendingIpOnlyEmitJobs[candidate.ipAddress] = launch {
+                            delay(IP_ONLY_HOSTNAME_GRACE_MS)
+                            emitPendingIpOnly(candidate.ipAddress)
+                        }
+                        true
+                    }
+                }
+                if (!queued) return@collect
+                return@collect
+            }
 
-        return mergedByIp.values.sortedBy { it.host }
+            val changed = stateLock.withLock {
+                pendingIpOnlyEmitJobs.remove(candidate.ipAddress)?.cancel()
+                pendingIpOnlyByIp.remove(candidate.ipAddress)
+                mergeEntry(mergedByIp, candidate)
+            }
+            if (changed) {
+                emitSnapshotIfChanged()
+            }
+        }
+
+        val jobsToCancel = stateLock.withLock {
+            pendingIpOnlyEmitJobs.values.toList().also { pendingIpOnlyEmitJobs.clear() }
+        }
+        jobsToCancel.forEach { it.cancel() }
+        val mergedPending = stateLock.withLock {
+            var changed = false
+            pendingIpOnlyByIp.values.forEach { candidate ->
+                if (mergeEntry(mergedByIp, candidate)) changed = true
+            }
+            pendingIpOnlyByIp.clear()
+            changed
+        }
+        if (mergedPending) {
+            emitSnapshotIfChanged()
+        }
+
+        // Always emit final snapshot, including empty results.
+        emitSnapshotIfChanged(force = true)
+    }.flowOn(Dispatchers.IO)
+
+    private fun mergeEntry(
+        mergedByIp: MutableMap<String, DiscoveredSmbServer>,
+        candidate: DiscoveredSmbServer,
+    ): Boolean {
+        val existing = mergedByIp[candidate.ipAddress]
+        if (existing == null) {
+            mergedByIp[candidate.ipAddress] = candidate
+            return true
+        }
+        // Keep first-seen result for a stable row; avoid late host upgrades for the same IP.
+        return false
     }
 
-    private suspend fun scanTargets(targets: List<String>): List<DiscoveredSmbServer> {
-        if (targets.isEmpty()) return emptyList()
-        val localIp = localIPv4Address()?.hostAddress
+    private fun scanTargets(
+        targets: List<String>,
+        localIp: String?,
+    ): Flow<DiscoveredSmbServer> = channelFlow {
+        if (targets.isEmpty()) return@channelFlow
         val semaphore = Semaphore(16)
-
-        return coroutineScope {
-            targets.map { ip ->
-                async {
-                    if (ip == localIp) return@async null
-                    semaphore.withPermit {
-                        if (isSmbPortOpen(ip)) {
+        targets.forEach { ip ->
+            launch {
+                if (ip == localIp) return@launch
+                semaphore.withPermit {
+                    if (isSmbPortOpen(ip)) {
+                        send(
                             DiscoveredSmbServer(
                                 host = reverseLookupName(ip) ?: resolveNetBiosHostname(ip) ?: ip,
                                 ipAddress = ip,
-                            )
-                        } else {
-                            null
-                        }
+                            ),
+                        )
                     }
                 }
-            }.awaitAll().filterNotNull().distinctBy { it.ipAddress }.sortedBy { it.host }
+            }
         }
     }
 
@@ -143,39 +203,79 @@ class AndroidSmbServerDiscoveryScanner(
         return null
     }
 
-    private fun discoverViaMdns(local: Inet4Address?): List<DiscoveredSmbServer> {
-        local ?: return emptyList()
-        return withMulticastLock {
+    private fun localMdnsBindingAddresses(): List<InetAddress> {
+        val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+        val bindings = mutableListOf<InetAddress>()
+        interfaces.forEach { networkInterface ->
+            if (!networkInterface.isUp || networkInterface.isLoopback) return@forEach
+            val addresses = Collections.list(networkInterface.inetAddresses)
+                .filter { !it.isLoopbackAddress && !it.isAnyLocalAddress }
+            val ipv4 = addresses.firstOrNull { it is Inet4Address }
+            val ipv6 = addresses.firstOrNull { it is Inet6Address }
+            if (ipv4 != null) bindings += ipv4
+            if (ipv6 != null) bindings += ipv6
+        }
+        return bindings.distinctBy { address ->
+            address.hostAddress?.substringBefore('%')?.trim()?.removePrefix("/").orEmpty()
+        }
+    }
+
+    private fun discoverViaMdns(bindings: List<InetAddress>): Flow<DiscoveredSmbServer> = flow {
+        if (bindings.isEmpty()) return@flow
+        withMulticastLock {
             runCatching {
-                JmDNS.create(local).use { jmDns ->
-                    mdnsServiceTypes().flatMap { serviceType ->
-                        jmDns.list(serviceType, 1600).flatMap { serviceInfo ->
-                            serviceInfo.hostAddresses.orEmpty().mapNotNull { ip ->
-                                val normalizedIp = ip.trim().removePrefix("/")
-                                if (normalizedIp.isBlank()) {
-                                    null
-                                } else {
-                                    val resolvedName = serviceInfo.name.ifBlank { normalizedIp }
-                                    DiscoveredSmbServer(
-                                        host = if (resolvedName.endsWith(".local", ignoreCase = true)) resolvedName else "$resolvedName.local",
-                                        ipAddress = normalizedIp,
-                                    )
+                val discoveredByIp = linkedMapOf<String, DiscoveredSmbServer>()
+                bindings.forEach { binding ->
+                    runCatching {
+                        JmDNS.create(binding).use { jmDns ->
+                            coroutineScope {
+                                val serviceInfoSets = mdnsServiceTypes().map { serviceType ->
+                                    async {
+                                        runCatching { jmDns.list(serviceType, 1600) }.getOrDefault(emptyArray())
+                                    }
+                                }.awaitAll()
+                                serviceInfoSets.forEach { serviceInfos ->
+                                    serviceInfos.forEach { serviceInfo ->
+                                        val serviceIps = linkedSetOf<String>()
+                                        serviceInfo.hostAddresses.orEmpty().forEach { ip ->
+                                            val normalized = ip.trim().removePrefix("/")
+                                            if (normalized.isNotBlank()) {
+                                                serviceIps += normalized
+                                            }
+                                        }
+                                        serviceInfo.inetAddresses.orEmpty().forEach { address ->
+                                            val normalized = address.hostAddress?.trim()?.removePrefix("/").orEmpty()
+                                            if (normalized.isNotBlank()) {
+                                                serviceIps += normalized
+                                            }
+                                        }
+                                        serviceIps.forEach { ip ->
+                                            val normalizedIp = ip.trim().removePrefix("/")
+                                            if (normalizedIp.isBlank()) return@forEach
+                                            val resolvedName = serviceInfo.name.ifBlank { normalizedIp }
+                                            val candidate = DiscoveredSmbServer(
+                                                host = if (resolvedName.endsWith(".local", ignoreCase = true)) resolvedName else "$resolvedName.local",
+                                                ipAddress = normalizedIp,
+                                            )
+                                            if (mergeEntry(discoveredByIp, candidate)) {
+                                                emit(discoveredByIp.getValue(normalizedIp))
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }.getOrDefault(emptyList())
-                .groupBy { it.ipAddress }
-                .mapNotNull { (ip, entries) ->
-                    val preferred = entries.firstOrNull { it.host != ip } ?: entries.firstOrNull()
-                    preferred?.copy(ipAddress = ip)
-                }
+            }
         }
     }
 
+    private fun probeCommonLocalHostnamesFlow(): Flow<DiscoveredSmbServer> = flow {
+        probeCommonLocalHostnames().forEach { emit(it) }
+    }
 
-    private fun <T> withMulticastLock(block: () -> T): T {
+    private suspend fun <T> withMulticastLock(block: suspend () -> T): T {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val lock = wifiManager?.createMulticastLock("nasbox-mdns-lock")
         lock?.setReferenceCounted(false)
@@ -196,11 +296,19 @@ class AndroidSmbServerDiscoveryScanner(
     private suspend fun probeCommonLocalHostnames(): List<DiscoveredSmbServer> = coroutineScope {
         commonHostnameCandidates().map { host ->
             async {
-                if (!isSmbPortOpen(host)) return@async null
-                val ip = runCatching { InetAddress.getByName(host).hostAddress }.getOrNull() ?: host
-                DiscoveredSmbServer(host = host, ipAddress = ip)
+                val resolved = runCatching { InetAddress.getAllByName(host).toList() }.getOrDefault(emptyList())
+                resolved.mapNotNull { address ->
+                    val ip = address.hostAddress?.trim()?.removePrefix("/").orEmpty()
+                    if (ip.isBlank()) {
+                        null
+                    } else if (isSmbPortOpen(ip)) {
+                        DiscoveredSmbServer(host = host, ipAddress = ip)
+                    } else {
+                        null
+                    }
+                }
             }
-        }.awaitAll().filterNotNull().distinctBy { it.host }
+        }.awaitAll().flatten().distinctBy { it.ipAddress }
     }
 
     private fun commonHostnameCandidates(): List<String> {
@@ -334,5 +442,9 @@ class AndroidSmbServerDiscoveryScanner(
         val b3 = value ushr 8 and 0xFF
         val b4 = value and 0xFF
         return "$b1.$b2.$b3.$b4"
+    }
+
+    companion object {
+        private const val IP_ONLY_HOSTNAME_GRACE_MS = 1_800L
     }
 }

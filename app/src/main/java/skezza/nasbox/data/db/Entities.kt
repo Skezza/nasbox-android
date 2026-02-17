@@ -79,6 +79,8 @@ data class PlanEntity(
     val scheduleDayOfMonth: Int = 1,
     @ColumnInfo(name = "schedule_interval_hours")
     val scheduleIntervalHours: Int = 24,
+    @ColumnInfo(name = "progress_notification_enabled")
+    val progressNotificationEnabled: Boolean = true,
 )
 
 @Entity(

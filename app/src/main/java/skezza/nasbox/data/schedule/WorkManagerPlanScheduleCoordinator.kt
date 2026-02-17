@@ -15,6 +15,7 @@ import skezza.nasbox.work.ScheduleTriggerWorker
 class WorkManagerPlanScheduleCoordinator(
     private val workManager: WorkManager,
     private val planRepository: PlanRepository,
+    private val cancelQueuedPlanRunWork: suspend (Long) -> Unit = {},
     private val recurrenceCalculator: PlanRecurrenceCalculator = PlanRecurrenceCalculator(),
     private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
 ) : PlanScheduleCoordinator {
@@ -56,6 +57,9 @@ class WorkManagerPlanScheduleCoordinator(
     }
 
     override suspend fun cancelPlan(planId: Long) {
+        runCatching {
+            cancelQueuedPlanRunWork(planId)
+        }
         workManager.cancelUniqueWork(nextRunName(planId))
         workManager.cancelUniqueWork(legacyPeriodicName(planId))
     }

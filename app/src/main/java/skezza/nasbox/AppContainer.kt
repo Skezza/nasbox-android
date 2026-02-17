@@ -83,7 +83,10 @@ class AppContainer(context: Context) {
         smbClient = smbClient,
     )
 
-    val enqueuePlanRunUseCase: EnqueuePlanRunUseCase = EnqueuePlanRunUseCase(workManager)
+    val enqueuePlanRunUseCase: EnqueuePlanRunUseCase = EnqueuePlanRunUseCase(
+        workManager = workManager,
+        planRepository = planRepository,
+    )
 
     val markRunInterruptedUseCase: MarkRunInterruptedUseCase = MarkRunInterruptedUseCase(
         runRepository = runRepository,
@@ -93,6 +96,7 @@ class AppContainer(context: Context) {
     val stopRunUseCase: StopRunUseCase = StopRunUseCase(
         runRepository = runRepository,
         runLogRepository = runLogRepository,
+        cancelQueuedPlanRunWork = enqueuePlanRunUseCase::cancelQueuedPlanRunWork,
     )
 
     val reconcileStaleActiveRunsUseCase: ReconcileStaleActiveRunsUseCase = ReconcileStaleActiveRunsUseCase(
@@ -103,6 +107,7 @@ class AppContainer(context: Context) {
     val planScheduleCoordinator: PlanScheduleCoordinator = WorkManagerPlanScheduleCoordinator(
         workManager = workManager,
         planRepository = planRepository,
+        cancelQueuedPlanRunWork = enqueuePlanRunUseCase::cancelQueuedPlanRunWork,
     )
 
     suspend fun reconcileSchedulesOnStartup() {

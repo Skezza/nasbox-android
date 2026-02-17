@@ -36,6 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import skezza.nasbox.domain.sync.RunExecutionMode
 import skezza.nasbox.domain.sync.RunPhase
+import skezza.nasbox.ui.common.runTitleLabel
+import skezza.nasbox.ui.common.shouldHideEnumStatusLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +53,7 @@ fun DashboardRunDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Run story") },
+                title = { Text("Run details") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -70,7 +72,7 @@ fun DashboardRunDetailScreen(
         ) {
             val run = state.run
             if (run == null) {
-                item { Text("Run not found.") }
+                item { Text("Run not found") }
             } else {
                 item {
                     StorySummaryCard(
@@ -121,11 +123,24 @@ private fun StorySummaryCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
+            val phaseStatusText = runPhaseLabel(run)
+            val hidePhaseStatusText = shouldHideEnumStatusLabel(
+                status = run.status,
+                statusLabel = phaseStatusText,
+                summaryError = run.summaryError,
+            )
             Text(
-                "${run.planName} - ${runPhaseLabel(run)} (${modeBadge(run.triggerSource, run.executionMode)})",
+                runTitleLabel(null, run.planName, run.triggerSource),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
             )
+            if (!hidePhaseStatusText) {
+                Text(
+                    phaseStatusText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             val processed = run.uploadedCount + run.skippedCount + run.failedCount
             val progress = if (run.scannedCount > 0) {
                 (processed.toFloat() / run.scannedCount.toFloat()).coerceIn(0f, 1f)
@@ -146,7 +161,12 @@ private fun StorySummaryCard(
                 )
             }
             Text(
-                "Scanned ${run.scannedCount}, uploaded ${run.uploadedCount}, skipped ${run.skippedCount}, failed ${run.failedCount}",
+                runCountSummaryText(
+                    scannedCount = run.scannedCount,
+                    uploadedCount = run.uploadedCount,
+                    skippedCount = run.skippedCount,
+                    failedCount = run.failedCount,
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -163,14 +183,9 @@ private fun StorySummaryCard(
                     )
                 }
             }
-            if (isActive) {
-                val waitingLabel = if (run.phase.uppercase(Locale.US) == RunPhase.WAITING_RETRY) {
-                    "Waiting for system background window..."
-                } else {
-                    "Current file: ${currentFileLabel ?: "Waiting for next file..."}"
-                }
+            if (isActive && run.phase.uppercase(Locale.US) == RunPhase.WAITING_RETRY) {
                 Text(
-                    waitingLabel,
+                    "Waiting for system background window...",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -230,7 +245,7 @@ private fun FileActivityCard(
         ) {
             Text("File activity", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (visibleRows.isEmpty()) {
-                Text("No file-level activity recorded yet.", style = MaterialTheme.typography.bodySmall)
+                Text("No file activity recorded yet.", style = MaterialTheme.typography.bodySmall)
             } else {
                 visibleRows.forEach { activity ->
                     FileActivityRow(activity = activity)
@@ -242,9 +257,9 @@ private fun FileActivityCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (showAllUploaded) {
-                        Text("Show fewer uploaded files")
+                        Text("Show fewer uploads")
                     } else {
-                        Text("Show all uploaded files (${uploaded.size})")
+                        Text("Show all uploads (${uploaded.size})")
                     }
                 }
             }
@@ -307,21 +322,13 @@ private fun TechnicalLogCard(
                 .animateContentSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Technical log", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                TextButton(onClick = onToggleExpanded) {
-                    Text(if (expanded) "Hide raw events" else "Show raw events")
-                }
+            Text("Technical log", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            TextButton(onClick = onToggleExpanded) {
+                Text(if (expanded) "Hide events" else "Show events")
             }
-            if (!expanded) {
-                Text(
-                    "Raw event stream is hidden to keep this view focused.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else if (logs.isEmpty()) {
-                Text("No raw events recorded.", style = MaterialTheme.typography.bodySmall)
-            } else {
+            if (expanded && logs.isEmpty()) {
+                Text("No log events recorded.", style = MaterialTheme.typography.bodySmall)
+            } else if (expanded) {
                 logs.take(MAX_RAW_LOG_ROWS).forEach { log ->
                     val severityColor = if (log.severity.equals("ERROR", ignoreCase = true)) {
                         MaterialTheme.colorScheme.error
@@ -344,7 +351,7 @@ private fun TechnicalLogCard(
                 }
                 if (logs.size > MAX_RAW_LOG_ROWS) {
                     Text(
-                        "Showing latest $MAX_RAW_LOG_ROWS raw events.",
+                        "Showing the latest $MAX_RAW_LOG_ROWS events.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -364,18 +371,13 @@ private fun runPhaseLabel(run: DashboardRunDetailSummary): String {
         RunPhase.WAITING_RETRY -> "Waiting for background window"
         RunPhase.FINISHING -> "Finishing"
         RunPhase.RUNNING -> if (mode == RunExecutionMode.BACKGROUND) {
-            "Running (background)"
+            "Running (scheduled)"
         } else {
-            "Running (manual foreground)"
+            "Running (manual)"
         }
         else -> runStatusLabel(run.status)
     }
 }
-
-private fun modeBadge(
-    triggerSource: String,
-    executionMode: String,
-): String = "${triggerSource.lowercase(Locale.US)}/${executionMode.lowercase(Locale.US)}"
 
 private const val DEFAULT_VISIBLE_UPLOADED = 5
 private const val MAX_RAW_LOG_ROWS = 120

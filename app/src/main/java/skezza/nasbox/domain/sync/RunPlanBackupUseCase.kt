@@ -5,11 +5,13 @@ import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import skezza.nasbox.data.db.BackupRecordEntity
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
+import skezza.nasbox.data.media.FolderScanProgress
 import skezza.nasbox.data.media.MediaImageItem
 import skezza.nasbox.data.media.MediaStoreDataSource
 import skezza.nasbox.data.repository.BackupRecordRepository
@@ -40,6 +42,7 @@ class RunPlanBackupUseCase(
         runId: Long? = null,
         executionMode: String? = null,
         continuationCursor: String? = null,
+        progressListener: (suspend (RunProgressSnapshot) -> Unit)? = null,
     ): RunExecutionResult = withContext(Dispatchers.IO) {
         val normalizedTriggerSource = normalizeTriggerSource(triggerSource)
         val normalizedExecutionMode = normalizeExecutionMode(executionMode, normalizedTriggerSource)
@@ -51,6 +54,16 @@ class RunPlanBackupUseCase(
 
         if (existingRun?.finishedAtEpochMs != null) {
             return@withContext existingRun.toExecutionResult(pausedForContinuation = false)
+        }
+
+        if (existingRun == null) {
+            val activeRunForPlan = findActiveRunForPlan(planId)
+            if (activeRunForPlan != null) {
+                val pausedForContinuation = activeRunForPlan.phase.trim().uppercase(Locale.US) == RunPhase.WAITING_RETRY &&
+                    !activeRunForPlan.continuationCursor.isNullOrBlank()
+                progressListener?.invoke(activeRunForPlan.toProgressSnapshot())
+                return@withContext activeRunForPlan.toExecutionResult(pausedForContinuation = pausedForContinuation)
+            }
         }
 
         val activeRun = if (existingRun == null) {
@@ -100,6 +113,27 @@ class RunPlanBackupUseCase(
             Log.i(LOG_TAG, "metric=$event runId=$runIdValue planId=$planId$suffix")
         }
 
+        suspend fun emitProgressSnapshot(
+            status: String,
+            phase: String,
+            continuationCursorValue: String?,
+        ) {
+            progressListener?.invoke(
+                RunProgressSnapshot(
+                    runId = runIdValue,
+                    planId = planId,
+                    status = status,
+                    phase = phase,
+                    scannedCount = scannedCount,
+                    uploadedCount = uploadedCount,
+                    skippedCount = skippedCount,
+                    failedCount = failedCount,
+                    continuationCursor = continuationCursorValue,
+                    resumeCount = resumeCount,
+                ),
+            )
+        }
+
         suspend fun persistSnapshot(
             phase: String,
             continuationCursorValue: String?,
@@ -135,6 +169,11 @@ class RunPlanBackupUseCase(
                     lastProgressAtEpochMs = lastProgressAt,
                 ),
             )
+            emitProgressSnapshot(
+                status = persisted,
+                phase = phase,
+                continuationCursorValue = continuationCursorValue,
+            )
         }
 
         suspend fun finalizeCanceledIfRequested(): RunExecutionResult? {
@@ -144,6 +183,11 @@ class RunPlanBackupUseCase(
                     cancellationLogged = true
                     log(SEVERITY_INFO, "Run cancellation acknowledged")
                 }
+                emitProgressSnapshot(
+                    status = RunStatus.CANCELED,
+                    phase = RunPhase.TERMINAL,
+                    continuationCursorValue = null,
+                )
                 return RunExecutionResult(
                     runId = runIdValue,
                     status = RunStatus.CANCELED,
@@ -179,6 +223,7 @@ class RunPlanBackupUseCase(
                 resumeCount = resumeCount,
                 lastProgressAt = lastProgressAt,
                 log = ::log,
+                progressCallback = progressListener,
             )
         }
 
@@ -200,6 +245,11 @@ class RunPlanBackupUseCase(
         if (isNewLogicalRun) {
             log(SEVERITY_INFO, "Run started")
             metric("run_started", "executionMode=$normalizedExecutionMode trigger=$normalizedTriggerSource")
+            emitProgressSnapshot(
+                status = RunStatus.RUNNING,
+                phase = RunPhase.RUNNING,
+                continuationCursorValue = currentCursor,
+            )
         } else {
             if (normalizedExecutionMode == RunExecutionMode.BACKGROUND) {
                 resumeCount += 1
@@ -227,13 +277,14 @@ class RunPlanBackupUseCase(
                 uploaded = uploadedCount,
                 skipped = skippedCount,
                 failed = failedCount + 1,
-                summaryError = "Plan no longer exists.",
+                summaryError = "Job no longer exists.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
                 executionMode = normalizedExecutionMode,
                 resumeCount = resumeCount,
                 lastProgressAt = lastProgressAt,
                 log = ::log,
+                progressCallback = progressListener,
             )
         }
 
@@ -248,13 +299,14 @@ class RunPlanBackupUseCase(
                 uploaded = uploadedCount,
                 skipped = skippedCount,
                 failed = failedCount + 1,
-                summaryError = "Plan is disabled.",
+                summaryError = "Job is disabled.",
                 status = RunStatus.FAILED,
                 triggerSource = normalizedTriggerSource,
                 executionMode = normalizedExecutionMode,
                 resumeCount = resumeCount,
                 lastProgressAt = lastProgressAt,
                 log = ::log,
+                progressCallback = progressListener,
             )
         }
 
@@ -277,6 +329,7 @@ class RunPlanBackupUseCase(
                 resumeCount = resumeCount,
                 lastProgressAt = lastProgressAt,
                 log = ::log,
+                progressCallback = progressListener,
             )
         }
 
@@ -299,6 +352,7 @@ class RunPlanBackupUseCase(
                 resumeCount = resumeCount,
                 lastProgressAt = lastProgressAt,
                 log = ::log,
+                progressCallback = progressListener,
             )
         }
 
@@ -325,6 +379,7 @@ class RunPlanBackupUseCase(
                 resumeCount = resumeCount,
                 lastProgressAt = lastProgressAt,
                 log = ::log,
+                progressCallback = progressListener,
             )
         }
 
@@ -353,7 +408,7 @@ class RunPlanBackupUseCase(
             SOURCE_TYPE_ALBUM -> {
                 runCatching {
                     SourceScanResult(
-                        items = mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum),
+                        items = mediaStoreDataSource.listImagesForAlbum(plan.sourceAlbum, plan.includeVideos),
                     )
                 }.getOrElse { throwable ->
                     val message = "Unable to scan local media. Check photo permission and album availability."
@@ -374,6 +429,7 @@ class RunPlanBackupUseCase(
                         resumeCount = resumeCount,
                         lastProgressAt = lastProgressAt,
                         log = ::log,
+                progressCallback = progressListener,
                     )
                 }
             }
@@ -398,15 +454,47 @@ class RunPlanBackupUseCase(
                         resumeCount = resumeCount,
                         lastProgressAt = lastProgressAt,
                         log = ::log,
+                progressCallback = progressListener,
                     )
                 }
 
                 log(SEVERITY_INFO, "Scanning folder source", "folderPath=${plan.folderPath}")
-                runCatching {
-                    SourceScanResult(
-                        items = mediaStoreDataSource.listFilesForFolder(plan.folderPath),
+                var scanCancelRequested = false
+                var lastScanProgressPersistAt = 0L
+                var lastScanStatusCheckAt = 0L
+
+                suspend fun onFolderScanProgress(progress: FolderScanProgress) {
+                    scannedCount = maxOf(scannedCount, progress.discoveredFiles)
+                    val now = nowEpochMs()
+                    if (progress.completed || (now - lastScanProgressPersistAt) >= SCAN_PROGRESS_PERSIST_INTERVAL_MS) {
+                        lastProgressAt = now
+                        persistSnapshot(
+                            phase = RunPhase.RUNNING,
+                            continuationCursorValue = currentCursor,
+                        )
+                        lastScanProgressPersistAt = now
+                    }
+                    if (progress.completed || (now - lastScanStatusCheckAt) >= SCAN_CANCEL_CHECK_INTERVAL_MS) {
+                        val status = readPersistedStatus(runIdValue)
+                        if (status == RunStatus.CANCEL_REQUESTED || status == RunStatus.CANCELED) {
+                            scanCancelRequested = true
+                        }
+                        lastScanStatusCheckAt = now
+                    }
+                }
+
+                val folderItems = try {
+                    mediaStoreDataSource.listFilesForFolder(
+                        folderPathOrUri = plan.folderPath,
+                        onProgress = ::onFolderScanProgress,
+                        shouldContinue = { !scanCancelRequested },
                     )
-                }.getOrElse { throwable ->
+                } catch (canceled: CancellationException) {
+                    if (scanCancelRequested) {
+                        finalizeCanceledIfRequested()?.let { return@withContext it }
+                    }
+                    throw canceled
+                } catch (throwable: Throwable) {
                     val message = "Unable to scan selected folder source. Confirm access to the selected folder."
                     log(SEVERITY_ERROR, message, throwable.message)
                     metric("run_interrupted", "reason=scan_folder_failed")
@@ -425,8 +513,10 @@ class RunPlanBackupUseCase(
                         resumeCount = resumeCount,
                         lastProgressAt = lastProgressAt,
                         log = ::log,
+                        progressCallback = progressListener,
                     )
                 }
+                SourceScanResult(items = folderItems)
             }
 
             SOURCE_TYPE_FULL_DEVICE -> {
@@ -456,6 +546,7 @@ class RunPlanBackupUseCase(
                         resumeCount = resumeCount,
                         lastProgressAt = lastProgressAt,
                         log = ::log,
+                progressCallback = progressListener,
                     )
                 }
             }
@@ -689,6 +780,7 @@ class RunPlanBackupUseCase(
             resumeCount = resumeCount,
             lastProgressAt = lastProgressAt,
             log = ::log,
+                progressCallback = progressListener,
         )
     }
 
@@ -765,6 +857,7 @@ class RunPlanBackupUseCase(
         resumeCount: Int,
         lastProgressAt: Long,
         log: suspend (String, String, String?) -> Unit,
+        progressCallback: (suspend (RunProgressSnapshot) -> Unit)? = null,
     ): RunExecutionResult {
         val finishedAt = nowEpochMs()
         runRepository.updateRun(
@@ -789,6 +882,20 @@ class RunPlanBackupUseCase(
             ),
         )
         log(SEVERITY_INFO, "Run finished", "status=$status uploaded=$uploaded skipped=$skipped failed=$failed")
+        progressCallback?.invoke(
+            RunProgressSnapshot(
+                runId = runId,
+                planId = planId,
+                status = status,
+                phase = RunPhase.TERMINAL,
+                scannedCount = scanned,
+                uploadedCount = uploaded,
+                skippedCount = skipped,
+                failedCount = failed,
+                continuationCursor = null,
+                resumeCount = resumeCount,
+            ),
+        )
         return RunExecutionResult(
             runId = runId,
             status = status,
@@ -848,6 +955,13 @@ class RunPlanBackupUseCase(
 
     private suspend fun readPersistedStatus(runId: Long): String? =
         runRepository.getRun(runId)?.status?.trim()?.uppercase(Locale.US)
+
+    private suspend fun findActiveRunForPlan(planId: Long): RunEntity? {
+        return runRepository
+            .latestRunsByStatuses(MAX_ACTIVE_RUN_LOOKBACK, ACTIVE_RUN_STATUSES)
+            .asSequence()
+            .firstOrNull { it.planId == planId && it.finishedAtEpochMs == null }
+    }
 
     private suspend fun finalizePriorActiveRunsForPlan(planId: Long) {
         val now = nowEpochMs()
@@ -915,6 +1029,8 @@ class RunPlanBackupUseCase(
         private const val MAX_ACTIVE_RUN_LOOKBACK = 200
         private const val MAX_WALL_MS_BACKGROUND = 7L * 60L * 1000L
         private const val MAX_ITEMS_PER_CHUNK_BACKGROUND = 80
+        private const val SCAN_PROGRESS_PERSIST_INTERVAL_MS = 1_000L
+        private const val SCAN_CANCEL_CHECK_INTERVAL_MS = 750L
         private val ACTIVE_RUN_STATUSES = setOf(
             RunStatus.RUNNING,
             RunStatus.CANCEL_REQUESTED,
@@ -936,6 +1052,19 @@ data class RunExecutionResult(
     val pausedForContinuation: Boolean = false,
 )
 
+data class RunProgressSnapshot(
+    val runId: Long,
+    val planId: Long,
+    val status: String,
+    val phase: String,
+    val scannedCount: Int,
+    val uploadedCount: Int,
+    val skippedCount: Int,
+    val failedCount: Int,
+    val continuationCursor: String? = null,
+    val resumeCount: Int = 0,
+)
+
 private fun RunEntity.toExecutionResult(pausedForContinuation: Boolean): RunExecutionResult {
     return RunExecutionResult(
         runId = runId,
@@ -949,6 +1078,21 @@ private fun RunEntity.toExecutionResult(pausedForContinuation: Boolean): RunExec
         resumeCount = resumeCount,
         lastProgressAtEpochMs = lastProgressAtEpochMs,
         pausedForContinuation = pausedForContinuation,
+    )
+}
+
+private fun RunEntity.toProgressSnapshot(): RunProgressSnapshot {
+    return RunProgressSnapshot(
+        runId = runId,
+        planId = planId,
+        status = status,
+        phase = phase,
+        scannedCount = scannedCount,
+        uploadedCount = uploadedCount,
+        skippedCount = skippedCount,
+        failedCount = failedCount,
+        continuationCursor = continuationCursor,
+        resumeCount = resumeCount,
     )
 }
 

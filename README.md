@@ -1,6 +1,8 @@
 # NASBox - SMB File Backup
 
-NASBox is an Android app for archiving shared-storage to local SMB shares (SMB2/3) with an intuitive interface. Developing it was an opportunity to test the latest Codex 5.3 and actually get something I needed. Can't guarantee the absence of bugs but core functionality seems okay. Feel free to get involved.
+Achive your devices shared-storage to local SMB shares (SMB2/3) with ease.
+
+Developing NASBox was an opportunity to test the latest Codex 5.3 and also get something I actually required.
 
 ## Current status
 

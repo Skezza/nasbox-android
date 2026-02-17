@@ -1,7 +1,9 @@
 package skezza.nasbox.ui.vault
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -83,7 +85,92 @@ class VaultViewModelGuestTest {
         assertEquals(listOf("guest"), viewModel.browseState.value.shares)
     }
 
-    private fun buildViewModel(browseUseCase: BrowseSmbDestinationUseCase): VaultViewModel {
+    @Test
+    fun discoverServers_updatesInRealtimeBeforeScanCompletes() = runTest {
+        val first = DiscoveredSmbServer(host = "alpha.local", ipAddress = "192.168.1.10")
+        val second = DiscoveredSmbServer(host = "beta.local", ipAddress = "192.168.1.20")
+        val releaseFinalEmission = CompletableDeferred<Unit>()
+        val discoverUseCase = DiscoverSmbServersUseCase(
+            scanner = object : SmbServerDiscoveryScanner {
+                override fun discover(): Flow<List<DiscoveredSmbServer>> = flow {
+                    emit(listOf(first))
+                    releaseFinalEmission.await()
+                    emit(listOf(first, second))
+                }
+            },
+        )
+        val viewModel = buildViewModel(
+            browseUseCase = BrowseSmbDestinationUseCase(
+                smbClient = FakeSmbClient(),
+                shareRpcEnumerator = FakeShareRpcEnumerator(),
+            ),
+            discoverUseCase = discoverUseCase,
+        )
+
+        viewModel.discoverServers()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.discoveryState.value.isScanning)
+        assertEquals(listOf(first), viewModel.discoveryState.value.servers)
+
+        releaseFinalEmission.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(false, viewModel.discoveryState.value.isScanning)
+        assertEquals(listOf(first, second), viewModel.discoveryState.value.servers)
+    }
+
+    @Test
+    fun discoverServers_scanAgainClearsExistingResults() = runTest {
+        val first = DiscoveredSmbServer(host = "alpha.local", ipAddress = "192.168.1.10")
+        val second = DiscoveredSmbServer(host = "beta.local", ipAddress = "192.168.1.20")
+        val releaseSecondScan = CompletableDeferred<Unit>()
+        var scanInvocation = 0
+        val discoverUseCase = DiscoverSmbServersUseCase(
+            scanner = object : SmbServerDiscoveryScanner {
+                override fun discover(): Flow<List<DiscoveredSmbServer>> = flow {
+                    scanInvocation += 1
+                    when (scanInvocation) {
+                        1 -> emit(listOf(first))
+                        2 -> {
+                            releaseSecondScan.await()
+                            emit(listOf(second))
+                        }
+                    }
+                }
+            },
+        )
+        val viewModel = buildViewModel(
+            browseUseCase = BrowseSmbDestinationUseCase(
+                smbClient = FakeSmbClient(),
+                shareRpcEnumerator = FakeShareRpcEnumerator(),
+            ),
+            discoverUseCase = discoverUseCase,
+        )
+
+        viewModel.discoverServers()
+        advanceUntilIdle()
+        assertEquals(listOf(first), viewModel.discoveryState.value.servers)
+
+        viewModel.discoverServers()
+        advanceUntilIdle()
+        assertTrue(viewModel.discoveryState.value.isScanning)
+        assertEquals(emptyList<DiscoveredSmbServer>(), viewModel.discoveryState.value.servers)
+
+        releaseSecondScan.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(false, viewModel.discoveryState.value.isScanning)
+        assertEquals(listOf(second), viewModel.discoveryState.value.servers)
+    }
+
+    private fun buildViewModel(
+        browseUseCase: BrowseSmbDestinationUseCase,
+        discoverUseCase: DiscoverSmbServersUseCase = DiscoverSmbServersUseCase(
+            scanner = object : SmbServerDiscoveryScanner {
+                override fun discover(): Flow<List<DiscoveredSmbServer>> = flowOf(emptyList())
+            },
+        ),
+    ): VaultViewModel {
         return VaultViewModel(
             serverRepository = FakeServerRepository(),
             credentialStore = FakeCredentialStore(),
@@ -92,11 +179,7 @@ class VaultViewModelGuestTest {
                 credentialStore = FakeCredentialStore(),
                 smbClient = FakeSmbClient(),
             ),
-            discoverSmbServersUseCase = DiscoverSmbServersUseCase(
-                scanner = object : SmbServerDiscoveryScanner {
-                    override suspend fun discover(): List<DiscoveredSmbServer> = emptyList()
-                },
-            ),
+            discoverSmbServersUseCase = discoverUseCase,
             browseSmbDestinationUseCase = browseUseCase,
         )
     }

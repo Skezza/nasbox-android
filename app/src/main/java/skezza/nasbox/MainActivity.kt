@@ -1,5 +1,7 @@
 package skezza.nasbox
 
+import android.app.ActivityManager
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,6 +20,7 @@ class MainActivity : ComponentActivity() {
             appContainer.reconcileSchedulesOnStartup()
             appContainer.reconcileRunsOnStartup()
         }
+        applyRecentsIcon()
         enableEdgeToEdge()
         setContent {
             NasBoxTheme {
@@ -27,6 +30,13 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun applyRecentsIcon() {
+        val label = getString(R.string.app_name)
+        val iconBitmap = BitmapFactory.decodeResource(resources, R.drawable.nasbox_icon_activity_opaque_1024)
+        @Suppress("DEPRECATION")
+        setTaskDescription(ActivityManager.TaskDescription(label, iconBitmap))
     }
 
     companion object {

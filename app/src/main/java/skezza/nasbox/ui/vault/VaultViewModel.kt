@@ -6,11 +6,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -206,9 +208,7 @@ class VaultViewModel(
             testingServerIds.value = testingServerIds.value + serverId
             runCatching {
                 val result = testSmbConnectionUseCase.testPersistedServer(serverId)
-                _message.value = listOfNotNull(result.message, result.recoveryHint, result.technicalDetail).joinToString(" ")
             }.onFailure {
-                _message.value = "Connection test failed due to an unexpected error."
             }
             testingServerIds.value = testingServerIds.value - serverId
         }
@@ -443,19 +443,30 @@ class VaultViewModel(
 
     fun discoverServers() {
         viewModelScope.launch {
-            _discoveryState.value = _discoveryState.value.copy(isScanning = true, errorMessage = null)
-            runCatching {
-                discoverSmbServersUseCase()
-            }.onSuccess { servers ->
-                _discoveryState.value = DiscoveryUiState(
+            _discoveryState.value = _discoveryState.value.copy(
+                isScanning = true,
+                servers = emptyList(),
+                errorMessage = null,
+            )
+            try {
+                discoverSmbServersUseCase().collect { servers ->
+                    _discoveryState.value = _discoveryState.value.copy(
+                        isScanning = true,
+                        servers = servers,
+                        errorMessage = null,
+                    )
+                }
+                val servers = _discoveryState.value.servers
+                _discoveryState.value = _discoveryState.value.copy(
                     isScanning = false,
-                    servers = servers,
                     errorMessage = null,
                 )
                 if (servers.isEmpty()) {
                     _message.value = "No SMB servers discovered. On Android emulators, LAN/mDNS discovery is often blocked by NAT. Try on a physical device or enter smb://quanta.local/<share> manually."
                 }
-            }.onFailure {
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
                 _discoveryState.value = _discoveryState.value.copy(
                     isScanning = false,
                     errorMessage = "Failed to scan the local network.",

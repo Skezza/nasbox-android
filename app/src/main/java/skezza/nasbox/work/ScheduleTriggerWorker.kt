@@ -18,13 +18,16 @@ class ScheduleTriggerWorker(
         if (planId <= 0L) return Result.failure()
 
         return runCatching {
+            val plan = appContainer.planRepository.getPlan(planId) ?: return@runCatching Result.success()
+            if (!plan.enabled || !plan.scheduleEnabled) {
+                appContainer.planScheduleCoordinator.cancelPlan(planId)
+                return@runCatching Result.success()
+            }
             appContainer.enqueuePlanRunUseCase(
                 planId = planId,
                 triggerSource = RunTriggerSource.SCHEDULED,
             )
-            appContainer.planRepository.getPlan(planId)?.let { plan ->
-                appContainer.planScheduleCoordinator.synchronizePlan(plan)
-            }
+            appContainer.planScheduleCoordinator.synchronizePlan(plan)
             Result.success()
         }.getOrElse {
             Result.retry()
