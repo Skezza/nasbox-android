@@ -9,11 +9,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -289,6 +292,7 @@ fun ServerEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
+                .navigationBarsPadding()
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -357,6 +361,8 @@ fun ServerEditorScreen(
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
+            Spacer(modifier = Modifier.height(24.dp))
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
                     Text(if (serverId == null) "Create server" else "Save server")
@@ -368,6 +374,7 @@ fun ServerEditorScreen(
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
                 }
             }
+            Spacer(modifier = Modifier.height(30.dp))
         }
     }
 }
