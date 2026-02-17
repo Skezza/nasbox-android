@@ -6,6 +6,7 @@ import java.util.Locale
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,9 +26,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,24 +40,29 @@ import skezza.nasbox.domain.sync.RunStatus
 import skezza.nasbox.ui.common.ErrorHint
 import skezza.nasbox.ui.common.LoadState
 import skezza.nasbox.ui.common.StateCard
+import skezza.nasbox.ui.common.runTitleLabel
+import skezza.nasbox.ui.common.shouldHideEnumStatusLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onOpenAudit: () -> Unit,
-    onOpenRunAudit: (Long) -> Unit,
+    onOpenRunDetail: (Long) -> Unit,
+    onClearRecentRun: (Long) -> Unit,
+    onClearAllRecentRuns: () -> Unit,
     onOpenCurrentRunDetail: (Long) -> Unit,
+    onRestartRun: (Long, Long, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsState()
     var pendingStopRunId by remember { mutableStateOf<Long?>(null) }
 
-    pendingStopRunId?.let { runId ->
-        AlertDialog(
-            onDismissRequest = { pendingStopRunId = null },
-            title = { Text("Stop run?") },
-            text = { Text("This run will stop after the current item finishes uploading.") },
+        pendingStopRunId?.let { runId ->
+            AlertDialog(
+                onDismissRequest = { pendingStopRunId = null },
+                title = { Text("Stop run?") },
+                text = { Text("Run stops after the current upload completes.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -73,7 +81,23 @@ fun DashboardScreen(
         )
     }
 
+    val isInitialLoading = state.loadState == LoadState.Loading && !state.hasLoadedData
+    var showLoadingCard by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isInitialLoading) {
+        if (!isInitialLoading) {
+            showLoadingCard = false
+            return@LaunchedEffect
+        }
+        showLoadingCard = false
+        delay(250)
+        if (isInitialLoading) {
+            showLoadingCard = true
+        }
+    }
+
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Dashboard") },
@@ -88,7 +112,7 @@ fun DashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (state.loadState == LoadState.Loading) {
+            if (showLoadingCard) {
                 item {
                     StateCard(
                         title = "Loading dashboard",
@@ -105,41 +129,52 @@ fun DashboardScreen(
                     ErrorHint(message = errorMessage)
                 }
             }
-            item {
-                VaultHealthCard(state = state)
-            }
-            if (state.currentRuns.isNotEmpty()) {
+            if (state.hasLoadedData) {
                 item {
-                    CurrentRunsCard(
-                        runs = state.currentRuns,
-                        stoppingRunIds = state.stoppingRunIds,
-                        onOpenCurrentRunDetail = onOpenCurrentRunDetail,
-                        onRequestStop = { runId -> pendingStopRunId = runId },
+                    RunHealthCard(
+                        runHealth = state.runHealth,
+                        onOpenRunDetail = onOpenRunDetail,
+                        onRestartRun = onRestartRun,
                     )
                 }
-            } else {
-                item {
-                    NextScheduledRunCard(nextRun = state.nextScheduledRun)
+                if (state.currentRuns.isNotEmpty()) {
+                    item {
+                        CurrentRunsCard(
+                            runs = state.currentRuns,
+                            stoppingRunIds = state.stoppingRunIds,
+                            onOpenCurrentRunDetail = onOpenCurrentRunDetail,
+                            onRequestStop = { runId -> pendingStopRunId = runId },
+                        )
+                    }
+                } else {
+                    item {
+                        NextScheduledRunCard(nextRun = state.nextScheduledRun)
+                    }
                 }
-            }
-            item {
-                RecentRunsCard(
-                    runs = state.recentRuns,
-                    onOpenAudit = onOpenAudit,
-                    onOpenRunAudit = onOpenRunAudit,
-                )
+                item {
+                    RecentRunsCard(
+                        runs = state.recentRuns,
+                        onOpenRunDetail = onOpenRunDetail,
+                        onClearRecentRun = onClearRecentRun,
+                        onClearAllRecentRuns = onClearAllRecentRuns,
+                        onOpenAudit = onOpenAudit,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun VaultHealthCard(state: DashboardUiState) {
-    val healthColor = when (state.vaultHealth.level) {
-        VaultHealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary
-        VaultHealthLevel.NEEDS_TEST -> MaterialTheme.colorScheme.tertiary
-        VaultHealthLevel.ATTENTION -> MaterialTheme.colorScheme.error
-        VaultHealthLevel.NOT_CONFIGURED -> MaterialTheme.colorScheme.outline
+private fun RunHealthCard(
+    runHealth: DashboardRunHealth,
+    onOpenRunDetail: (Long) -> Unit,
+    onRestartRun: (Long, Long, String?) -> Unit,
+) {
+    val headlineColor = when (runHealth.level) {
+        RunHealthLevel.CRITICAL -> MaterialTheme.colorScheme.error
+        RunHealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary
+        RunHealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -149,14 +184,73 @@ private fun VaultHealthCard(state: DashboardUiState) {
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Backup health", style = MaterialTheme.typography.labelLarge)
+            Text("Backup Health", style = MaterialTheme.typography.labelLarge)
             Text(
-                text = state.vaultHealth.title,
+                runHealth.title,
                 style = MaterialTheme.typography.titleMedium,
-                color = healthColor,
+                color = headlineColor,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(text = state.vaultHealth.detail, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                runHealth.detail,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (runHealth.issues.isEmpty()) {
+                runHealth.lastSuccessAtEpochMs?.let {
+                    Text(
+                        "Last success ${formatRelativePast(it)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    runHealth.issues.forEach { issue ->
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val issueStatusText = statusLabel(issue.status)
+                            val hideIssueStatusText = shouldHideEnumStatusLabel(
+                                status = issue.status,
+                                statusLabel = issueStatusText,
+                                summaryError = issue.summaryError,
+                            )
+                            val failureSummary = if (issue.streakLength == 1) {
+                                "1 failure"
+                            } else {
+                                "${issue.streakLength} consecutive failures"
+                            }
+                            Text(
+                                if (hideIssueStatusText) {
+                                    "${issue.planName} • $failureSummary"
+                                } else {
+                                    "${issue.planName} - $issueStatusText • $failureSummary"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                "Last update ${formatRelativePast(issue.lastUpdatedAtEpochMs)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            issue.summaryError?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { onOpenRunDetail(issue.runId) }) {
+                                    Text("View run")
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        onRestartRun(issue.planId, issue.runId, issue.continuationCursor)
+                                    },
+                                ) {
+                                    Text("Restart")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -170,14 +264,14 @@ private fun NextScheduledRunCard(nextRun: DashboardNextScheduledRun?) {
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("Next scheduled run", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Next scheduled job", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (nextRun == null) {
                 Text(
-                    "No scheduled jobs are enabled.",
+                    "No schedules are enabled.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "Enable a schedule in Jobs to automate backups.",
+                    "Enable a schedule to automate backups.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -198,9 +292,8 @@ private fun NextScheduledRunCard(nextRun: DashboardNextScheduledRun?) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (nextRun.additionalScheduledPlans > 0) {
-                    val suffix = if (nextRun.additionalScheduledPlans == 1) "" else "s"
                     Text(
-                        "+${nextRun.additionalScheduledPlans} more scheduled job$suffix",
+                        "+${nextRun.additionalScheduledPlans} more scheduled job(s)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -224,7 +317,7 @@ private fun CurrentRunsCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Current runs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Active runs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             runs.forEach { run ->
                 val processed = run.uploadedCount + run.skippedCount + run.failedCount
                 val progress = if (run.scannedCount > 0) {
@@ -253,13 +346,13 @@ private fun CurrentRunsCard(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            "${run.planName} - ${currentPhaseLabel(run)}",
+                            runTitleLabel(null, run.planName, run.triggerSource),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            modeBadge(run.triggerSource, run.executionMode),
-                            style = MaterialTheme.typography.labelSmall,
+                            currentPhaseLabel(run),
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (progress == null) {
@@ -276,7 +369,13 @@ private fun CurrentRunsCard(
                             )
                         }
                         Text(
-                            "Scanned ${run.scannedCount}, uploaded ${run.uploadedCount}, skipped ${run.skippedCount}, failed ${run.failedCount}",
+                            runCountSummaryText(
+                                scannedCount = run.scannedCount,
+                                uploadedCount = run.uploadedCount,
+                                skippedCount = run.skippedCount,
+                                failedCount = run.failedCount,
+                                includeScanned = false,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
@@ -295,7 +394,7 @@ private fun CurrentRunsCard(
                                 Text(stopLabel)
                             }
                             OutlinedButton(onClick = { onOpenCurrentRunDetail(run.runId) }) {
-                                Text("Live detail")
+                                Text("Run details")
                             }
                         }
                     }
@@ -308,8 +407,10 @@ private fun CurrentRunsCard(
 @Composable
 private fun RecentRunsCard(
     runs: List<DashboardRecentRun>,
+    onOpenRunDetail: (Long) -> Unit,
+    onClearRecentRun: (Long) -> Unit,
+    onClearAllRecentRuns: () -> Unit,
     onOpenAudit: () -> Unit,
-    onOpenRunAudit: (Long) -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -323,14 +424,33 @@ private fun RecentRunsCard(
                 Text("No completed runs yet.", style = MaterialTheme.typography.bodyMedium)
             } else {
                 runs.forEach { run ->
+                    val statusText = statusLabel(run.status)
+                    val hideStatusText = shouldHideEnumStatusLabel(
+                        status = run.status,
+                        statusLabel = statusText,
+                        summaryError = run.summaryError,
+                    )
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            "${run.planName} - ${statusLabel(run.status)} (${modeBadge(run.triggerSource, run.executionMode)})",
+                            runTitleLabel(null, run.planName, run.triggerSource),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
+                        if (!hideStatusText) {
+                            Text(
+                                statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
-                            "Uploaded ${run.uploadedCount}, skipped ${run.skippedCount}, failed ${run.failedCount}",
+                            runCountSummaryText(
+                                scannedCount = 0,
+                                uploadedCount = run.uploadedCount,
+                                skippedCount = run.skippedCount,
+                                failedCount = run.failedCount,
+                                includeScanned = false,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
@@ -348,14 +468,37 @@ private fun RecentRunsCard(
                         run.summaryError?.takeIf { it.isNotBlank() }?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                         }
-                        OutlinedButton(onClick = { onOpenRunAudit(run.runId) }) {
-                            Text("Run story")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(onClick = { onOpenRunDetail(run.runId) }) {
+                                Text("View run")
+                            }
+                            OutlinedButton(onClick = { onClearRecentRun(run.runId) }) {
+                                Text("Clear")
+                            }
                         }
                     }
                 }
             }
-            ElevatedButton(onClick = onOpenAudit, modifier = Modifier.fillMaxWidth()) {
-                Text("Open Audit")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ElevatedButton(
+                    onClick = onOpenAudit,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Audit")
+                }
+                OutlinedButton(
+                    onClick = onClearAllRecentRuns,
+                    modifier = Modifier.weight(1f),
+                    enabled = runs.isNotEmpty(),
+                ) {
+                    Text("Clear all")
+                }
             }
         }
     }
@@ -380,20 +523,13 @@ private fun currentPhaseLabel(run: DashboardCurrentRun): String {
         RunPhase.FINISHING -> "Finishing"
         RunPhase.RUNNING -> {
             if (executionMode == RunExecutionMode.BACKGROUND) {
-                "Running (background)"
+                "Running (scheduled)"
             } else {
-                "Running (manual foreground)"
+                "Running (manual)"
             }
         }
         else -> statusLabel(run.status)
     }
-}
-
-private fun modeBadge(
-    triggerSource: String,
-    executionMode: String,
-): String {
-    return "${triggerSource.lowercase(Locale.US)}/${executionMode.lowercase(Locale.US)}"
 }
 
 private fun formatTimestamp(epochMs: Long): String =
@@ -414,5 +550,23 @@ private fun formatRelativeFuture(
         days > 0L -> "in ${days}d ${hours}h"
         hours > 0L -> "in ${hours}h ${minutes}m"
         else -> "in ${minutes}m"
+    }
+}
+
+private fun formatRelativePast(
+    targetEpochMs: Long,
+    nowEpochMs: Long = System.currentTimeMillis(),
+): String {
+    val elapsedMs = nowEpochMs - targetEpochMs
+    if (elapsedMs <= 0L) return "just now"
+    val totalMinutes = elapsedMs / (60L * 1000L)
+    if (totalMinutes == 0L) return "just now"
+    val days = totalMinutes / (24L * 60L)
+    val hours = (totalMinutes % (24L * 60L)) / 60L
+    val minutes = totalMinutes % 60L
+    return when {
+        days > 0L -> "${days}d ${hours}h ago"
+        hours > 0L -> "${hours}h ${minutes}m ago"
+        else -> "${minutes}m ago"
     }
 }

@@ -12,8 +12,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,12 +54,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import skezza.nasbox.domain.plan.PlanSourceType
 import skezza.nasbox.domain.schedule.PLAN_MAX_INTERVAL_HOURS
 import skezza.nasbox.domain.schedule.PlanScheduleFrequency
@@ -68,6 +73,8 @@ import skezza.nasbox.domain.schedule.isDaySelected
 import skezza.nasbox.ui.common.ErrorHint
 import skezza.nasbox.ui.common.LoadState
 import skezza.nasbox.ui.common.StateCard
+
+private const val RUN_NOW_SOFT_DISABLE_MS = 10_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,8 +90,18 @@ fun PlansScreen(
     val message by viewModel.message.collectAsState()
     val activeRunPlanIds by viewModel.activeRunPlanIds.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     var pendingRunPlanId by remember { mutableStateOf<Long?>(null) }
     var pendingRunPermissions by remember { mutableStateOf<List<String>>(emptyList()) }
+    var softDisabledRunPlanIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+
+    fun softDisableRunButton(planId: Long) {
+        softDisabledRunPlanIds = softDisabledRunPlanIds + planId
+        coroutineScope.launch {
+            delay(RUN_NOW_SOFT_DISABLE_MS)
+            softDisabledRunPlanIds = softDisabledRunPlanIds - planId
+        }
+    }
 
     val runPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         val planId = pendingRunPlanId
@@ -105,6 +122,7 @@ fun PlansScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 expandedHeight = 56.dp,
@@ -126,7 +144,7 @@ fun PlansScreen(
             planListState.loadState == LoadState.Loading -> {
                 StateCard(
                     title = "Loading jobs",
-                    description = "Gathering your saved plans and servers.",
+                    description = "Loading saved jobs and servers.",
                     progressContent = {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     },
@@ -142,25 +160,26 @@ fun PlansScreen(
                 ) {
                     ErrorHint(
                         message = planListState.errorMessage
-                            ?: "Unable to load plans. Check permissions and try again.",
+                            ?: "Unable to load jobs. Check storage permissions or network.",
                     )
                     StateCard(
-                        title = "Jobs could not be displayed",
-                        description = "Check your media permissions or network and reopen this screen.",
+                        title = "Jobs unavailable",
+                        description = "Check storage permissions or network, then return to this screen.",
                     )
                 }
             }
             planListState.plans.isEmpty() -> {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(24.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(24.dp)
+                    .offset(y = (-48).dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
                     StateCard(
                         title = "No jobs yet",
-                        description = "Create a job to back up your favorite albums to a NAS server.",
+                        description = "Create a job to back up albums to your NAS.",
                         actionLabel = "Add job",
                         onAction = onAddPlan,
                     )
@@ -196,9 +215,17 @@ fun PlansScreen(
                                 Text("Schedule: ${plan.scheduleSummary}")
                                 Text(if (plan.enabled) "Enabled" else "Disabled")
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    val isRunActive = activeRunPlanIds.contains(plan.planId)
+                                    val isRunSoftDisabled = softDisabledRunPlanIds.contains(plan.planId)
                                     Button(onClick = { onEditPlan(plan.planId) }) { Text("Edit") }
                                     Button(
                                         onClick = {
+                                            if (activeRunPlanIds.contains(plan.planId) ||
+                                                softDisabledRunPlanIds.contains(plan.planId)
+                                            ) {
+                                                return@Button
+                                            }
+                                            softDisableRunButton(plan.planId)
                                             val requiredPermissions = requiredRunPermissions(
                                                 sourceType = plan.sourceType,
                                                 includeVideos = plan.includeVideos,
@@ -217,9 +244,15 @@ fun PlansScreen(
                                                 runPermissionLauncher.launch(deniedPermissions.toTypedArray())
                                             }
                                         },
-                                        enabled = plan.enabled && !activeRunPlanIds.contains(plan.planId),
+                                        enabled = plan.enabled && !isRunActive && !isRunSoftDisabled,
                                     ) {
-                                        Text(if (activeRunPlanIds.contains(plan.planId)) "Running..." else "Run now")
+                                        Text(
+                                            when {
+                                                isRunActive -> "Running..."
+                                                isRunSoftDisabled -> "Starting..."
+                                                else -> "Run now"
+                                            },
+                                        )
                                     }
                                     Button(onClick = { viewModel.deletePlan(plan.planId) }) {
                                         Icon(Icons.Default.Delete, contentDescription = null)
@@ -318,8 +351,8 @@ fun PlanEditorScreen(
             when (editorState.sourceType) {
                 PlanSourceType.ALBUM -> {
                     if (!hasMediaPermission) {
-                        Text("Photo permission is required to list albums.")
-                        Button(onClick = { permissionLauncher.launch(permission) }) { Text("Grant media access") }
+                        Text("Photo access is required to list albums.")
+                        Button(onClick = { permissionLauncher.launch(permission) }) { Text("Grant photo access") }
                     } else {
                         if (isLoadingAlbums) Text("Loading albums...")
                         if (albums.isEmpty()) Text("No albums found. Capture or import photos to create jobs.")
@@ -334,7 +367,7 @@ fun PlanEditorScreen(
                             Switch(checked = editorState.includeVideos, onCheckedChange = viewModel::updateEditorIncludeVideos)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Use album templating")
+                        Text("Use album template")
                             Switch(checked = editorState.useAlbumTemplating, onCheckedChange = viewModel::updateEditorUseAlbumTemplating)
                         }
                     }
@@ -344,7 +377,7 @@ fun PlanEditorScreen(
                     OutlinedTextField(
                         value = editorState.folderPath,
                         onValueChange = viewModel::updateEditorFolderPath,
-                        label = { Text("Folder URI/path") },
+                    label = { Text("Folder path") },
                         supportingText = { editorState.validation.folderPathError?.let { Text(it) } },
                         isError = editorState.validation.folderPathError != null,
                         singleLine = true,
@@ -356,7 +389,7 @@ fun PlanEditorScreen(
                             Text("Choose folder", modifier = Modifier.padding(start = 6.dp))
                         }
                         ElevatedButton(onClick = { viewModel.updateEditorFolderPath("/storage/emulated/0/DCIM") }) {
-                            Text("Use DCIM")
+                            Text("Use DCIM folder")
                         }
                     }
                 }
@@ -371,7 +404,7 @@ fun PlanEditorScreen(
                                 Icon(Icons.Default.Info, contentDescription = null)
                                 Text("Full phone backup")
                             }
-                            Text("This job backs up all available shared-storage (DCIM, Documents, Downloads etc).")
+                            Text("This job backs up all shared storage (DCIM, Documents, Downloads, etc.).")
                         }
                     }
                 }
@@ -420,7 +453,15 @@ fun PlanEditorScreen(
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Run automatically")
+                Text("Show progress notification")
+                Switch(
+                    checked = editorState.progressNotificationEnabled,
+                    onCheckedChange = viewModel::updateEditorProgressNotificationEnabled,
+                )
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Auto-run")
                 Switch(
                     checked = editorState.scheduleEnabled,
                     onCheckedChange = viewModel::updateEditorScheduleEnabled,
@@ -428,10 +469,10 @@ fun PlanEditorScreen(
             }
 
             if (editorState.scheduleEnabled) {
-                Text("Quick presets")
+            Text("Schedule presets")
                 SchedulePresetChips(onSelect = viewModel::applySchedulePreset)
 
-                Text("Recurrence")
+            Text("Frequency")
                 RecurrenceSelector(
                     selectedFrequency = editorState.scheduleFrequency,
                     onSelect = viewModel::updateEditorScheduleFrequency,
@@ -461,7 +502,7 @@ fun PlanEditorScreen(
                             dayOfMonth = editorState.scheduleDayOfMonth,
                             onSelect = viewModel::updateEditorScheduleDayOfMonth,
                         )
-                        Text("If the selected day is missing for a month, the run falls back to the last day.")
+                        Text("If a selected day is missing, the schedule falls back to the month's last day.")
                         ScheduleTimeButton(
                             scheduleTimeMinutes = editorState.scheduleTimeMinutes,
                             onPicked = viewModel::updateEditorScheduleTimeMinutes,
@@ -488,7 +529,7 @@ fun PlanEditorScreen(
             Text("Schedule: $scheduleHint")
 
             Button(onClick = { viewModel.savePlan(onNavigateBack) }) {
-                Text(if (planId == null) "Create job" else "Save changes")
+                Text(if (planId == null) "Create job" else "Save job")
             }
         }
     }

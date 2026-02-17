@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
@@ -29,6 +31,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -82,6 +86,7 @@ fun VaultScreen(
 
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -94,18 +99,21 @@ fun VaultScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Add server")
                     }
-                    IconButton(
-                        modifier = Modifier.size(52.dp),
-                        onClick = {
-                            showDiscoveryDialog = true
-                            viewModel.discoverServers()
-                        },
-                    ) {
-                        Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
-                    }
                 },
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = {
+                    showDiscoveryDialog = true
+                    viewModel.discoverServers()
+                },
+                modifier = Modifier.padding(bottom = 130.dp),
+            ) {
+                Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
         modifier = modifier,
     ) { innerPadding ->
         if (showDiscoveryDialog) {
@@ -145,20 +153,21 @@ fun VaultScreen(
                 ) {
                     ErrorHint(
                         message = serverListState.errorMessage
-                            ?: "Unable to load servers. Check SMB credentials or network.",
+                            ?: "Unable to load servers. Check SMB credentials or Wi-Fi, then reopen.",
                     )
                     StateCard(
                         title = "Servers unavailable",
-                        description = "Verify SMB credentials or Wi-Fi connectivity, then reopen this screen.",
+                        description = "Verify SMB credentials or Wi-Fi, then reopen.",
                     )
                 }
             }
             serverListState.servers.isEmpty() -> {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(24.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(24.dp)
+                    .offset(y = (-48).dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
                     StateCard(
@@ -190,9 +199,9 @@ fun VaultScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Text(server.name)
-                                Text(server.endpoint)
-                                Text("Base: ${server.basePath}")
-                                Text(server.connectionStatusLabel())
+                                Text("Share: ${server.endpoint}")
+                                Text("Path: ${server.basePath.ifBlank { "/" }}")
+                                Text(server.onlineStatusLabel())
                                 if (server.lastTestStatus == "FAILED" && !server.lastTestErrorMessage.isNullOrBlank()) {
                                     Text("Last error: ${server.lastTestErrorMessage}")
                                 }
@@ -264,7 +273,7 @@ fun ServerEditorScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text(if (serverId == null) "Add Server" else "Edit Server") },
+                title = { Text(if (serverId == null) "Add server" else "Edit server") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -287,7 +296,7 @@ fun ServerEditorScreen(
                 fieldName = "Name",
                 value = state.name,
                 error = state.validation.nameError,
-                helperText = "Name: pick something memorable (e.g., Home NAS).",
+                helperText = "Name (e.g., Home NAS).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.NAME, it)
             }
@@ -295,7 +304,7 @@ fun ServerEditorScreen(
                 fieldName = "Host",
                 value = state.host,
                 error = state.validation.hostError,
-                helperText = "Host: smb://example.local/photos.",
+                helperText = "Host (e.g., smb://example.local/photos).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
@@ -303,7 +312,7 @@ fun ServerEditorScreen(
                 fieldName = "Share",
                 value = state.shareName,
                 error = state.validation.shareNameError,
-                helperText = "Share: optional; you can append it to the host (smb://host/share).",
+                helperText = "Share (optional; append to the host, e.g., smb://host/share).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
@@ -311,7 +320,7 @@ fun ServerEditorScreen(
                 fieldName = "Base path",
                 value = state.basePath,
                 error = state.validation.basePathError,
-                helperText = "Base path: optional subfolder under the share.",
+                helperText = "Base path (optional subfolder).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
@@ -320,13 +329,13 @@ fun ServerEditorScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.TravelExplore, contentDescription = null)
-                Text("Browse share & folder", modifier = Modifier.padding(start = 8.dp))
+                Text("Browse share and folder", modifier = Modifier.padding(start = 8.dp))
             }
             ServerField(
                 fieldName = "Domain / workgroup",
                 value = state.domain,
                 error = null,
-                helperText = "Domain: optional SMB domain (e.g., WORKGROUP).",
+                helperText = "Domain (optional, e.g., WORKGROUP).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.DOMAIN, it)
             }
@@ -334,7 +343,7 @@ fun ServerEditorScreen(
                 fieldName = "Username",
                 value = state.username,
                 error = state.validation.usernameError,
-                helperText = "Username: required only for authenticated access.",
+                helperText = "Username (required for authenticated access).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
@@ -343,14 +352,14 @@ fun ServerEditorScreen(
                 value = state.password,
                 error = state.validation.passwordError,
                 isPassword = true,
-                helperText = "Password: leave blank for guest access.",
+                helperText = "Password (leave blank for guest access).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
-                    Text(if (serverId == null) "Create server" else "Save changes")
+                    Text(if (serverId == null) "Create server" else "Save server")
                 }
                 ElevatedButton(
                     onClick = viewModel::testEditorConnection,
@@ -398,18 +407,17 @@ private fun DiscoveryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Discover SMB Servers") },
+        title = { Text("Discover SMB servers") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Scanning local Wi-Fi subnet for devices with SMB port 445 open.")
-                if (state.isScanning) {
+                if (state.isScanning && state.servers.isEmpty()) {
                     Text("Scanning...")
                 }
                 if (state.errorMessage != null) {
                     Text(state.errorMessage)
                 }
                 if (!state.isScanning && state.servers.isEmpty() && state.errorMessage == null) {
-                    Text("No SMB servers discovered.")
+                    Text("No SMB servers found.")
                 }
                 androidx.compose.foundation.lazy.LazyColumn(
                     modifier = Modifier.heightIn(max = 260.dp),
@@ -499,10 +507,10 @@ private fun BrowseDestinationDialog(
                     Text(state.errorMessage)
                 }
                 if (!state.isLoading && state.errorMessage.isNullOrBlank() && state.selectedShare.isBlank() && state.shares.isEmpty()) {
-                    Text("No shares returned yet. Tap Refresh to retry.")
+                    Text("No shares returned yet. Tap Refresh.")
                 }
                 if (!state.isLoading && state.errorMessage.isNullOrBlank() && state.selectedShare.isNotBlank() && state.directories.isEmpty()) {
-                    Text("No folders found at this location.")
+                    Text("No folders found here.")
                 }
                 val browseEntries = if (state.selectedShare.isBlank()) {
                     state.shares.map { BrowseListItem.Share(it) }
@@ -565,11 +573,11 @@ private fun BrowseDestinationDialog(
     )
 }
 
-private fun ServerListItemUiState.connectionStatusLabel(): String {
+private fun ServerListItemUiState.onlineStatusLabel(): String {
+    val latencySuffix = lastTestLatencyMs?.let { " (${it}ms)" } ?: ""
     return when (lastTestStatus) {
-        "SUCCESS" -> "Connection: Passed${lastTestLatencyMs?.let { " (${it}ms)" } ?: ""}"
-        "FAILED" -> "Connection: Failed"
-        else -> "Connection: Not tested"
+        "SUCCESS" -> "Online: Yes$latencySuffix"
+        else -> "Online: No$latencySuffix"
     }
 }
 
