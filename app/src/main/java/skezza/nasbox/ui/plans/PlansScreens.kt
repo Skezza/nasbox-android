@@ -12,9 +12,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -330,6 +334,8 @@ fun PlanEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
+                .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(editorScrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -531,6 +537,7 @@ fun PlanEditorScreen(
             Button(onClick = { viewModel.savePlan(onNavigateBack) }) {
                 Text(if (planId == null) "Create job" else "Save job")
             }
+            Spacer(modifier = Modifier.height(48.dp))
         }
     }
 }
