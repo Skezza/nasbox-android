@@ -267,7 +267,7 @@ private fun NextScheduledRunCard(nextRun: DashboardNextScheduledRun?) {
             Text("Next scheduled job", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (nextRun == null) {
                 Text(
-                    "No schedules are enabled.",
+                    "No jobs are scheduled to run.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
@@ -421,7 +421,7 @@ private fun RecentRunsCard(
         ) {
             Text("Recent runs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (runs.isEmpty()) {
-                Text("No completed runs yet.", style = MaterialTheme.typography.bodyMedium)
+                Text("No recent runs.", style = MaterialTheme.typography.bodyMedium)
             } else {
                 runs.forEach { run ->
                     val statusText = statusLabel(run.status)
