@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
@@ -112,7 +111,6 @@ fun VaultScreen(
                     showDiscoveryDialog = true
                     viewModel.discoverServers()
                 },
-                modifier = Modifier.padding(bottom = 130.dp),
             ) {
                 Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
             }
@@ -187,7 +185,6 @@ fun VaultScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        .navigationBarsPadding()
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -275,6 +272,7 @@ fun ServerEditorScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -294,7 +292,6 @@ fun ServerEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .navigationBarsPadding()
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -310,7 +307,7 @@ fun ServerEditorScreen(
                 fieldName = "Host",
                 value = state.host,
                 error = state.validation.hostError,
-                helperText = "Host (e.g., smb://example.local/photos).",
+                helperText = "Host (e.g. smb://example.local).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
@@ -318,7 +315,7 @@ fun ServerEditorScreen(
                 fieldName = "Share",
                 value = state.shareName,
                 error = state.validation.shareNameError,
-                helperText = "Share (optional; append to the host, e.g., smb://host/share).",
+                helperText = "Share (smb://host/{share}).",
             ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
@@ -363,7 +360,7 @@ fun ServerEditorScreen(
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.weight(1f, fill = true))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
@@ -376,8 +373,7 @@ fun ServerEditorScreen(
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
                 }
             }
-            Spacer(modifier = Modifier.height(30.dp))
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }

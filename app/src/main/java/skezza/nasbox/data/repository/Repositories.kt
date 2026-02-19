@@ -60,6 +60,7 @@ class DefaultPlanRepository(
 interface BackupRecordRepository {
     suspend fun create(record: BackupRecordEntity): Long
     suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity?
+    suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity>
 }
 
 class DefaultBackupRecordRepository(
@@ -71,6 +72,14 @@ class DefaultBackupRecordRepository(
         planId: Long,
         mediaItemId: String,
     ): BackupRecordEntity? = backupRecordDao.getByPlanAndMediaItem(planId, mediaItemId)
+
+    override suspend fun findByPlanAndMediaItems(
+        planId: Long,
+        mediaItemIds: List<String>,
+    ): List<BackupRecordEntity> {
+        if (mediaItemIds.isEmpty()) return emptyList()
+        return backupRecordDao.getByPlanAndMediaItems(planId, mediaItemIds)
+    }
 }
 
 interface RunRepository {
@@ -130,6 +139,7 @@ class DefaultRunRepository(
 interface RunLogRepository {
     suspend fun createLog(log: RunLogEntity): Long
     suspend fun logsForRun(runId: Long): List<RunLogEntity>
+    fun observeLogsForRun(runId: Long): Flow<List<RunLogEntity>>
     fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>>
     fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>>
 }
@@ -140,6 +150,8 @@ class DefaultRunLogRepository(
     override suspend fun createLog(log: RunLogEntity): Long = runLogDao.insert(log)
 
     override suspend fun logsForRun(runId: Long): List<RunLogEntity> = runLogDao.getForRun(runId)
+
+    override fun observeLogsForRun(runId: Long): Flow<List<RunLogEntity>> = runLogDao.observeForRun(runId)
 
     override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> =
         runLogDao.observeForRunNewest(runId, limit)

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -192,7 +191,6 @@ fun PlansScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        .navigationBarsPadding()
                         .imePadding()
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -317,6 +315,7 @@ fun PlanEditorScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(if (planId == null) "New Job" else "Edit Job") },
@@ -334,7 +333,6 @@ fun PlanEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .navigationBarsPadding()
                 .imePadding()
                 .verticalScroll(editorScrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -534,10 +532,12 @@ fun PlanEditorScreen(
             )
             Text("Schedule: $scheduleHint")
 
+            Spacer(modifier = Modifier.weight(1f, fill = true))
+
             Button(onClick = { viewModel.savePlan(onNavigateBack) }) {
                 Text(if (planId == null) "Create job" else "Save job")
             }
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
