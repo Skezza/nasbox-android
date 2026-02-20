@@ -294,34 +294,38 @@ fun ServerEditorScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             ServerField(
-                fieldName = "Name",
+                labelText = "Name",
+                placeholderText = "Home NAS",
                 value = state.name,
                 error = state.validation.nameError,
-                helperText = "Name (e.g., Home NAS).",
+                helperText = "Friendly label shown in lists.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.NAME, it)
             }
             ServerField(
-                fieldName = "Host",
+                labelText = "Host",
+                placeholderText = "smb://example.local",
                 value = state.host,
                 error = state.validation.hostError,
-                helperText = "Host (e.g. smb://example.local).",
+                helperText = "SMB endpoint URL or hostname.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
             ServerField(
-                fieldName = "Share",
+                labelText = "Share",
+                placeholderText = "share-name",
                 value = state.shareName,
                 error = state.validation.shareNameError,
-                helperText = "Share (smb://host/{share}).",
+                helperText = "Share name hosted by the server.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
             ServerField(
-                fieldName = "Base path",
+                labelText = "Base path",
+                placeholderText = "Media/Photos",
                 value = state.basePath,
                 error = state.validation.basePathError,
-                helperText = "Base path (optional subfolder).",
+                helperText = "Optional path relative to the share.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
@@ -333,27 +337,30 @@ fun ServerEditorScreen(
                 Text("Browse share and folder", modifier = Modifier.padding(start = 8.dp))
             }
             ServerField(
-                fieldName = "Domain / workgroup",
+                labelText = "Domain / workgroup",
+                placeholderText = "WORKGROUP",
                 value = state.domain,
                 error = null,
-                helperText = "Domain (optional, e.g., WORKGROUP).",
+                helperText = "Optional domain/workgroup for SMB auth.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.DOMAIN, it)
             }
             ServerField(
-                fieldName = "Username",
+                labelText = "Username",
+                placeholderText = "nasuser",
                 value = state.username,
                 error = state.validation.usernameError,
-                helperText = "Username (required for authenticated access).",
+                helperText = "Required if the share needs credentials.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
             ServerField(
-                fieldName = "Password",
+                labelText = "Password",
+                placeholderText = "••••••",
                 value = state.password,
                 error = state.validation.passwordError,
                 isPassword = true,
-                helperText = "Password (leave blank for guest access).",
+                helperText = "Leave blank for guest access.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
@@ -378,7 +385,8 @@ fun ServerEditorScreen(
 
 @Composable
 private fun ServerField(
-    fieldName: String,
+    labelText: String,
+    placeholderText: String? = null,
     value: String,
     error: String?,
     helperText: String? = null,
@@ -388,7 +396,8 @@ private fun ServerField(
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        placeholder = { Text(fieldName) },
+        label = { Text(labelText) },
+        placeholder = placeholderText?.let { { Text(it) } },
         isError = error != null,
         singleLine = true,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
