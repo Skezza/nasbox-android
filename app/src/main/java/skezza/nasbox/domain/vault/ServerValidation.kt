@@ -33,13 +33,18 @@ data class ServerValidationResult(
 class ValidateServerInputUseCase {
     operator fun invoke(input: ServerInput): ServerValidationResult {
         val parsedTarget = SmbTargetParser.parse(input.host, input.shareName)
+        val credentialsProvided = input.username.isNotBlank() || input.password.isNotBlank()
         return ServerValidationResult(
             nameError = input.name.requireValue("Server name is required."),
             hostError = if (parsedTarget is ParsedSmbTargetResult.Error) parsedTarget.message else null,
             shareNameError = if (parsedTarget is ParsedSmbTargetResult.Error) parsedTarget.message else null,
             basePathError = input.basePath.requireValue("Base path is required."),
-            usernameError = input.username.requireValue("Username is required."),
-            passwordError = input.password.requireValue("Password is required."),
+            usernameError = if (credentialsProvided && input.username.isBlank()) {
+                "Username is required."
+            } else null,
+            passwordError = if (credentialsProvided && input.password.isBlank()) {
+                "Password is required."
+            } else null,
         )
     }
 
