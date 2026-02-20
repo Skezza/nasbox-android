@@ -333,7 +333,6 @@ fun PlanEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .imePadding()
                 .verticalScroll(editorScrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {

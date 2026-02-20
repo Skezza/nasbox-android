@@ -32,6 +32,7 @@ import skezza.nasbox.AppContainer
 import skezza.nasbox.ui.audit.AuditRunDetailScreen
 import skezza.nasbox.ui.audit.AuditScreen
 import skezza.nasbox.ui.audit.AuditViewModel
+import skezza.nasbox.ui.about.AboutScreen
 import skezza.nasbox.ui.dashboard.DashboardRunDetailScreen
 import skezza.nasbox.ui.dashboard.DashboardRunDetailViewModel
 import skezza.nasbox.ui.dashboard.DashboardScreen
@@ -51,6 +52,7 @@ private const val ROUTE_PLAN_EDITOR = "planEditor"
 private const val ROUTE_AUDIT = "audit"
 private const val ROUTE_AUDIT_RUN = "auditRun"
 private const val ROUTE_DASHBOARD_RUN = "dashboardRun"
+private const val ROUTE_ABOUT = "about"
 
 private enum class TopLevelDestination(
     val route: String,
@@ -165,6 +167,7 @@ fun NasBoxApp(
                 DashboardScreen(
                     viewModel = dashboardViewModel,
                     onOpenAudit = { navController.navigate(ROUTE_AUDIT) },
+                    onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                     onOpenRunDetail = { runId -> navController.navigate("$ROUTE_DASHBOARD_RUN/$runId") },
                     onClearRecentRun = { runId -> dashboardViewModel.clearRecentRun(runId) },
                     onClearAllRecentRuns = { dashboardViewModel.clearAllRecentRuns() },
@@ -249,6 +252,11 @@ fun NasBoxApp(
                     viewModel = auditViewModel,
                     onBack = { navController.popBackStack() },
                     onOpenRun = { runId -> navController.navigate("$ROUTE_AUDIT_RUN/$runId") },
+                )
+            }
+            composable(ROUTE_ABOUT) {
+                AboutScreen(
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(
