@@ -49,7 +49,7 @@ class DashboardRunDetailViewModel(
             ?.uppercase(Locale.US)
             ?.let { phase -> phase != RunPhase.TERMINAL }
             ?: false
-        val logsAscending = logsAllAscending.sortedBy { it.timestampEpochMs }
+        val logsAscending = logsAllAscending
         val backupFilenameByMediaId = buildBackupFilenameMap(
             planId = run?.planId,
             logsAscending = logsAscending,

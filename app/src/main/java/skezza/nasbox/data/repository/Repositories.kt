@@ -78,7 +78,15 @@ class DefaultBackupRecordRepository(
         mediaItemIds: List<String>,
     ): List<BackupRecordEntity> {
         if (mediaItemIds.isEmpty()) return emptyList()
-        return backupRecordDao.getByPlanAndMediaItems(planId, mediaItemIds)
+        return mediaItemIds
+            .chunked(BACKUP_RECORD_MEDIA_ID_CHUNK_SIZE)
+            .flatMap { mediaIdChunk ->
+                backupRecordDao.getByPlanAndMediaItems(planId, mediaIdChunk)
+            }
+    }
+
+    private companion object {
+        const val BACKUP_RECORD_MEDIA_ID_CHUNK_SIZE = 900
     }
 }
 
