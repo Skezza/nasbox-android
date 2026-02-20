@@ -46,8 +46,8 @@ class DashboardViewModelTest {
 
         val state = harness.viewModel.uiState.value
         assertEquals(VaultHealthLevel.NOT_CONFIGURED, state.vaultHealth.level)
-        assertEquals("No jobs have run yet", state.runHealth.title)
-        assertEquals("Run a backup to start archiving files.", state.runHealth.detail)
+        assertEquals("No jobs have run", state.runHealth.title)
+        assertEquals("Run a job to start archiving files.", state.runHealth.detail)
         assertTrue(state.currentRuns.isEmpty())
         assertTrue(state.recentRuns.isEmpty())
     }
@@ -735,6 +735,9 @@ private class FakeRunLogRepository : RunLogRepository {
         }
 
         override suspend fun logsForRun(runId: Long): List<RunLogEntity> = logs.filter { it.runId == runId }
+
+        override fun observeLogsForRun(runId: Long): Flow<List<RunLogEntity>> =
+            flowOf(logs.filter { it.runId == runId }.sortedBy { it.timestampEpochMs })
 
         override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> = flowOf(
             logs.filter { it.runId == runId }.sortedByDescending { it.timestampEpochMs }.take(limit),

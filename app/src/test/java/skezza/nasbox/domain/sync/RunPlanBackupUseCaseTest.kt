@@ -662,6 +662,11 @@ class RunPlanBackupUseCaseTest {
                 null
             }
         }
+
+        override suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity> {
+            val existing = findByPlanAndMediaItem(planId, existingMediaItemId) ?: return emptyList()
+            return if (existingMediaItemId in mediaItemIds) listOf(existing) else emptyList()
+        }
     }
 
     private class FakeRunRepository : RunRepository {
@@ -729,6 +734,9 @@ class RunPlanBackupUseCaseTest {
         }
 
         override suspend fun logsForRun(runId: Long): List<RunLogEntity> = logs
+
+        override fun observeLogsForRun(runId: Long): Flow<List<RunLogEntity>> =
+            flowOf(logs.filter { it.runId == runId }.sortedBy { it.timestampEpochMs })
 
         override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> =
             flowOf(logs.filter { it.runId == runId }.sortedByDescending { it.timestampEpochMs }.take(limit))

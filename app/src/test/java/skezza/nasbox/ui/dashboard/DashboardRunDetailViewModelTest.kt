@@ -14,10 +14,12 @@ import org.junit.Rule
 import org.junit.Test
 import skezza.nasbox.MainDispatcherRule
 import skezza.nasbox.data.db.PlanEntity
+import skezza.nasbox.data.db.BackupRecordEntity
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
 import skezza.nasbox.data.db.RunTimelineLogRow
 import skezza.nasbox.data.db.ServerEntity
+import skezza.nasbox.data.repository.BackupRecordRepository
 import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
@@ -88,6 +90,7 @@ class DashboardRunDetailViewModelTest {
                     ),
                 ),
             ),
+            backupRecordRepository = FakeBackupRecordRepository(),
         )
 
         advanceUntilIdle()
@@ -157,6 +160,7 @@ class DashboardRunDetailViewModelTest {
                     ),
                 ),
             ),
+            backupRecordRepository = FakeBackupRecordRepository(),
         )
 
         advanceUntilIdle()
@@ -203,6 +207,7 @@ class DashboardRunDetailViewModelTest {
                     ),
                 ),
             ),
+            backupRecordRepository = FakeBackupRecordRepository(),
         )
 
         advanceUntilIdle()
@@ -279,6 +284,7 @@ class DashboardRunDetailViewModelTest {
                     ),
                 ),
             ),
+            backupRecordRepository = FakeBackupRecordRepository(),
         )
 
         advanceUntilIdle()
@@ -321,10 +327,22 @@ class DashboardRunDetailViewModelTest {
     ) : RunLogRepository {
         override suspend fun createLog(log: RunLogEntity): Long = 0
         override suspend fun logsForRun(runId: Long): List<RunLogEntity> = logs.value.filter { it.runId == runId }
+        override fun observeLogsForRun(runId: Long): Flow<List<RunLogEntity>> =
+            flowOf(logs.value.filter { it.runId == runId }.sortedBy { it.timestampEpochMs })
+
         override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> =
             flowOf(logs.value.filter { it.runId == runId }.sortedByDescending { it.timestampEpochMs }.take(limit))
 
         override fun observeLatestTimeline(limit: Int): Flow<List<RunTimelineLogRow>> = flowOf(emptyList())
+    }
+
+    private class FakeBackupRecordRepository : BackupRecordRepository {
+        override suspend fun create(record: BackupRecordEntity): Long = record.recordId
+
+        override suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity? = null
+
+        override suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity> =
+            emptyList()
     }
 
     private class FakeServerRepository(
