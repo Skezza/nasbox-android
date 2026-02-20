@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import skezza.nasbox.data.db.RunEntity
 import skezza.nasbox.data.db.RunLogEntity
+import skezza.nasbox.data.repository.BackupRecordRepository
 import skezza.nasbox.data.repository.PlanRepository
 import skezza.nasbox.data.repository.RunLogRepository
 import skezza.nasbox.data.repository.RunRepository
@@ -27,14 +28,16 @@ class DashboardRunDetailViewModel(
     serverRepository: ServerRepository,
     runRepository: RunRepository,
     runLogRepository: RunLogRepository,
+    backupRecordRepository: BackupRecordRepository,
 ) : ViewModel() {
 
     val uiState: StateFlow<DashboardRunDetailUiState> = combine(
         planRepository.observePlans(),
         serverRepository.observeServers(),
         runRepository.observeRun(runId),
+        runLogRepository.observeLogsForRun(runId),
         runLogRepository.observeLogsForRunNewest(runId, RUN_LOG_LIMIT),
-    ) { plans, servers, run, logsNewest ->
+    ) { plans, servers, run, logsAllAscending, logsNewest ->
         val planInfoById = buildPlanDisplayInfoMap(plans, servers)
         val planName = run?.let { current ->
             planInfoById[current.planId]?.planName
@@ -46,8 +49,16 @@ class DashboardRunDetailViewModel(
             ?.uppercase(Locale.US)
             ?.let { phase -> phase != RunPhase.TERMINAL }
             ?: false
-        val logsAscending = logsNewest.sortedBy { it.timestampEpochMs }
-        val fileActivities = buildFileActivities(logsAscending)
+        val logsAscending = logsAllAscending
+        val backupFilenameByMediaId = buildBackupFilenameMap(
+            planId = run?.planId,
+            logsAscending = logsAscending,
+            backupRecordRepository = backupRecordRepository,
+        )
+        val fileActivities = buildFileActivities(
+            logsAscending = logsAscending,
+            backupFilenameByMediaId = backupFilenameByMediaId,
+        )
         val currentFile = if (isActive) {
             fileActivities.firstOrNull { it.status == DashboardRunFileStatus.PROCESSING }?.displayName
                 ?: logsNewest.firstNotNullOfOrNull { it.toCurrentFileLabel() }
@@ -106,9 +117,15 @@ class DashboardRunDetailViewModel(
         )
 
         val reachedProgress = mutableSetOf<Int>()
+        var scanCompleteLogged = false
         logsAscending.forEach { log ->
             when (log.message) {
-                MESSAGE_SCAN_COMPLETE -> milestones += DashboardRunDetailMilestone("Scan complete", log.timestampEpochMs)
+                MESSAGE_SCAN_COMPLETE -> {
+                    if (!scanCompleteLogged) {
+                        scanCompleteLogged = true
+                        milestones += DashboardRunDetailMilestone("Scan complete", log.timestampEpochMs)
+                    }
+                }
                 MESSAGE_STOP_REQUESTED -> milestones += DashboardRunDetailMilestone("Stop requested", log.timestampEpochMs)
                 MESSAGE_CANCELLATION_ACKNOWLEDGED ->
                     milestones += DashboardRunDetailMilestone("Cancel acknowledged", log.timestampEpochMs)
@@ -116,8 +133,6 @@ class DashboardRunDetailViewModel(
                     milestones += DashboardRunDetailMilestone("Interrupted", log.timestampEpochMs)
                 MESSAGE_FINALIZED_CANCELED ->
                     milestones += DashboardRunDetailMilestone("Recovered as canceled", log.timestampEpochMs)
-                MESSAGE_CHUNK_PAUSED ->
-                    milestones += DashboardRunDetailMilestone("Chunk paused for system window", log.timestampEpochMs)
                 MESSAGE_FINISHED -> {
                     val finishedLabel = statusLabelFromRunFinishedDetail(log.detail)
                     milestones += DashboardRunDetailMilestone(finishedLabel, log.timestampEpochMs)
@@ -134,7 +149,7 @@ class DashboardRunDetailViewModel(
                 }
                 else -> {
                     if (log.message.startsWith(MESSAGE_RESUMED_ATTEMPT_PREFIX)) {
-                        milestones += DashboardRunDetailMilestone(log.message, log.timestampEpochMs)
+                        // deliberately ignore resumed attempt messages for milestones
                     }
                 }
             }
@@ -168,9 +183,32 @@ class DashboardRunDetailViewModel(
         )
     }
 
-    private fun buildFileActivities(logsAscending: List<RunLogEntity>): List<DashboardRunFileActivity> {
+    private suspend fun buildBackupFilenameMap(
+        planId: Long?,
+        logsAscending: List<RunLogEntity>,
+        backupRecordRepository: BackupRecordRepository,
+    ): Map<String, String> {
+        val resolvedPlanId = planId ?: return emptyMap()
+        val mediaIds = logsAscending.asSequence()
+            .mapNotNull { log -> extractMediaId(log.detail) ?: extractMediaIdFromMessage(log.message) }
+            .distinct()
+            .toList()
+        if (mediaIds.isEmpty()) return emptyMap()
+        return backupRecordRepository.findByPlanAndMediaItems(
+            planId = resolvedPlanId,
+            mediaItemIds = mediaIds,
+        ).mapNotNull { record ->
+            val filename = extractFilename(record.remotePath)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            record.mediaItemId to filename
+        }.toMap()
+    }
+
+    private fun buildFileActivities(
+        logsAscending: List<RunLogEntity>,
+        backupFilenameByMediaId: Map<String, String>,
+    ): List<DashboardRunFileActivity> {
         val byMediaId = linkedMapOf<String, MutableFileActivity>()
-        val displayByMediaId = mutableMapOf<String, String>()
+        val displayByMediaId = backupFilenameByMediaId.toMutableMap()
 
         fun upsert(
             mediaId: String,
@@ -525,6 +563,7 @@ class DashboardRunDetailViewModel(
             serverRepository: ServerRepository,
             runRepository: RunRepository,
             runLogRepository: RunLogRepository,
+            backupRecordRepository: BackupRecordRepository,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(DashboardRunDetailViewModel::class.java)) {
@@ -535,6 +574,7 @@ class DashboardRunDetailViewModel(
                         serverRepository = serverRepository,
                         runRepository = runRepository,
                         runLogRepository = runLogRepository,
+                        backupRecordRepository = backupRecordRepository,
                     ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

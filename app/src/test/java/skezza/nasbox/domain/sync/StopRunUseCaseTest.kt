@@ -138,6 +138,9 @@ class StopRunUseCaseTest {
 
         override suspend fun logsForRun(runId: Long): List<RunLogEntity> = logs.filter { it.runId == runId }
 
+        override fun observeLogsForRun(runId: Long): Flow<List<RunLogEntity>> =
+            flowOf(logs.filter { it.runId == runId }.sortedBy { it.timestampEpochMs })
+
         override fun observeLogsForRunNewest(runId: Long, limit: Int): Flow<List<RunLogEntity>> =
             flowOf(logs.filter { it.runId == runId }.sortedByDescending { it.timestampEpochMs }.take(limit))
 

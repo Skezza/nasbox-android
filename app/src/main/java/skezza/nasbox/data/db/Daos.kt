@@ -50,6 +50,9 @@ interface BackupRecordDao {
 
     @Query("SELECT * FROM backup_records WHERE plan_id = :planId AND media_item_id = :mediaItemId")
     suspend fun getByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity?
+
+    @Query("SELECT * FROM backup_records WHERE plan_id = :planId AND media_item_id IN (:mediaItemIds)")
+    suspend fun getByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity>
 }
 
 @Dao
@@ -101,6 +104,9 @@ interface RunDao {
 interface RunLogDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(log: RunLogEntity): Long
+
+    @Query("SELECT * FROM run_logs WHERE run_id = :runId ORDER BY timestamp_epoch_ms ASC")
+    fun observeForRun(runId: Long): Flow<List<RunLogEntity>>
 
     @Query("SELECT * FROM run_logs WHERE run_id = :runId ORDER BY timestamp_epoch_ms ASC")
     suspend fun getForRun(runId: Long): List<RunLogEntity>

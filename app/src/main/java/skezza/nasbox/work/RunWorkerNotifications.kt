@@ -18,6 +18,7 @@ internal object RunWorkerNotifications {
     const val RUNNING_CHANNEL_ID = "nasbox.backup.running"
     const val ISSUE_CHANNEL_ID = "nasbox.backup.issue"
     private const val FOREGROUND_NOTIFICATION_ID_BASE = 401
+    private const val COMPLETION_NOTIFICATION_ID_BASE = 60_000
     private const val ISSUE_NOTIFICATION_ID_BASE = 2_000
 
     fun createForegroundInfo(
@@ -192,6 +193,61 @@ internal object RunWorkerNotifications {
         runCatching {
             manager.notify(notificationId, notification)
         }
+    }
+
+    fun postCompletionNotification(
+        context: Context,
+        planId: Long,
+        runId: Long,
+        planName: String? = null,
+        uploadedCount: Int,
+        skippedCount: Int,
+        failedCount: Int,
+    ) {
+        ensureChannel(
+            context = context,
+            channelId = RUNNING_CHANNEL_ID,
+            name = "Backup Running",
+            importance = NotificationManager.IMPORTANCE_LOW,
+        )
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(MainActivity.EXTRA_OPEN_RUN_ID, runId)
+        }
+        val notificationId = completionNotificationId(runId, planId)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val resolvedJobName = planName?.trim()?.takeIf { it.isNotBlank() } ?: "Job #$planId"
+        val processed = (uploadedCount + skippedCount + failedCount).coerceAtLeast(0)
+        val contentText = "Uploaded $uploadedCount, Skipped $skippedCount, Failed $failedCount"
+        val notification = NotificationCompat.Builder(context, RUNNING_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_nasbox)
+            .setContentTitle("$resolvedJobName backup completed")
+            .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setAutoCancel(false)
+            .setOngoing(false)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(pendingIntent)
+            .setProgress(processed.coerceAtLeast(1), processed, false)
+            .build()
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        runCatching {
+            manager.notify(notificationId, notification)
+        }
+    }
+
+    private fun completionNotificationId(runId: Long, planId: Long): Int {
+        // Keep completion notifications on a distinct ID range so foreground teardown
+        // doesn't remove the completion card right after posting.
+        val seed = if (runId > 0L) runId else planId
+        return COMPLETION_NOTIFICATION_ID_BASE + ((seed and 0x7fffffff) % 50_000).toInt()
     }
 
     private fun ensureChannel(

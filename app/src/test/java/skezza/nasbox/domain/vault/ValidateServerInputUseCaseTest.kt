@@ -22,6 +22,41 @@ class ValidateServerInputUseCaseTest {
 
         assertFalse(result.isValid)
         assertTrue(result.nameError != null)
+        assertTrue(result.passwordError == null)
+    }
+
+    @Test
+    fun acceptsBlankCredentialsForGuestAccess() {
+        val result = useCase(
+            ServerInput(
+                name = "Home NAS",
+                host = "quanta.local",
+                shareName = "photos",
+                basePath = "backup",
+                username = "",
+                password = "",
+            ),
+        )
+
+        assertTrue(result.isValid)
+        assertTrue(result.usernameError == null)
+        assertTrue(result.passwordError == null)
+    }
+
+    @Test
+    fun requiresPasswordWhenUsernameProvided() {
+        val result = useCase(
+            ServerInput(
+                name = "Home NAS",
+                host = "quanta.local",
+                shareName = "photos",
+                basePath = "backup",
+                username = "admin",
+                password = "",
+            ),
+        )
+
+        assertFalse(result.isValid)
         assertTrue(result.passwordError != null)
     }
 

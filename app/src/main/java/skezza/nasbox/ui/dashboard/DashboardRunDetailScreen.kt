@@ -7,6 +7,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -47,10 +48,11 @@ fun DashboardRunDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsState()
-    var showAllUploaded by rememberSaveable { mutableStateOf(false) }
+    var showAllFileActivity by rememberSaveable { mutableStateOf(false) }
     var showTechnicalLogs by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Run details") },
@@ -92,8 +94,8 @@ fun DashboardRunDetailScreen(
                 item {
                     FileActivityCard(
                         activities = state.fileActivities,
-                        showAllUploaded = showAllUploaded,
-                        onToggleShowAllUploaded = { showAllUploaded = !showAllUploaded },
+                        showAllActivity = showAllFileActivity,
+                        onToggleShowAllActivity = { showAllFileActivity = !showAllFileActivity },
                     )
                 }
 
@@ -227,13 +229,15 @@ private fun MilestonesCard(milestones: List<DashboardRunDetailMilestone>) {
 @Composable
 private fun FileActivityCard(
     activities: List<DashboardRunFileActivity>,
-    showAllUploaded: Boolean,
-    onToggleShowAllUploaded: () -> Unit,
+    showAllActivity: Boolean,
+    onToggleShowAllActivity: () -> Unit,
 ) {
-    val uploaded = activities.filter { it.status == DashboardRunFileStatus.UPLOADED }
-    val nonUploaded = activities.filter { it.status != DashboardRunFileStatus.UPLOADED }
-    val visibleUploaded = if (showAllUploaded) uploaded else uploaded.take(DEFAULT_VISIBLE_UPLOADED)
-    val visibleRows = (nonUploaded + visibleUploaded).sortedByDescending { it.timestampEpochMs }
+    val sortedRows = activities.sortedByDescending { it.timestampEpochMs }
+    val visibleRows = if (showAllActivity) {
+        sortedRows
+    } else {
+        sortedRows.take(DEFAULT_VISIBLE_FILE_ACTIVITY_ROWS)
+    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -247,19 +251,26 @@ private fun FileActivityCard(
             if (visibleRows.isEmpty()) {
                 Text("No file activity recorded yet.", style = MaterialTheme.typography.bodySmall)
             } else {
+                if (!showAllActivity && activities.size > visibleRows.size) {
+                    Text(
+                        "Showing ${visibleRows.size} of ${activities.size} items.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 visibleRows.forEach { activity ->
                     FileActivityRow(activity = activity)
                 }
             }
-            if (uploaded.size > DEFAULT_VISIBLE_UPLOADED) {
+            if (activities.size > DEFAULT_VISIBLE_FILE_ACTIVITY_ROWS) {
                 OutlinedButton(
-                    onClick = onToggleShowAllUploaded,
+                    onClick = onToggleShowAllActivity,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if (showAllUploaded) {
-                        Text("Show fewer uploads")
+                    if (showAllActivity) {
+                        Text("Show fewer items")
                     } else {
-                        Text("Show all uploads (${uploaded.size})")
+                        Text("Show all items (${activities.size})")
                     }
                 }
             }
@@ -379,5 +390,5 @@ private fun runPhaseLabel(run: DashboardRunDetailSummary): String {
     }
 }
 
-private const val DEFAULT_VISIBLE_UPLOADED = 5
+private const val DEFAULT_VISIBLE_FILE_ACTIVITY_ROWS = 30
 private const val MAX_RAW_LOG_ROWS = 120

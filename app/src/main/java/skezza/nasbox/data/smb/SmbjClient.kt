@@ -29,18 +29,33 @@ class SmbjClient : SmbClient {
     }
 
     override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = withContext(Dispatchers.IO) {
-        val latency = measureTimeMillis {
-            SMBClient().use { smbClient ->
-                smbClient.connect(request.host).use { connection ->
-                    val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
-                    connection.authenticate(authContext).use { session ->
-                        if (request.shareName.isBlank()) {
-                            Unit
-                        } else {
-                            session.connectShare(request.shareName).close()
+        val latency = SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                var lastError: Throwable? = null
+                for (candidate in browseAuthCandidates(request.username, request.password)) {
+                    val attempt = runCatching {
+                        measureTimeMillis {
+                            connection.authenticate(candidate.context).use { session ->
+                                if (request.shareName.isBlank()) {
+                                    Unit
+                                } else {
+                                    session.connectShare(request.shareName).close()
+                                }
+                            }
                         }
                     }
+                    val measuredLatency = attempt.getOrNull()
+                    if (measuredLatency != null) {
+                        return@use measuredLatency
+                    }
+                    lastError = attempt.exceptionOrNull()
+                    Log.w(
+                        BROWSE_TAG,
+                        "testConnection authFailed host=${request.host} share=${request.shareName} mode=${candidate.mode} username=${request.username.trim()}",
+                        lastError,
+                    )
                 }
+                throw lastError ?: IllegalStateException("SMB test connection failed without exception.")
             }
         }
         SmbConnectionResult(latencyMs = latency)

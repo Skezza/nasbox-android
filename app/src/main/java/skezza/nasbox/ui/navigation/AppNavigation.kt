@@ -1,8 +1,5 @@
 package skezza.nasbox.ui.navigation
 
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,12 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -94,6 +87,9 @@ fun NasBoxApp(
             browseSmbDestinationUseCase = appContainer.browseSmbDestinationUseCase,
         ),
     )
+    LaunchedEffect(Unit) {
+        vaultViewModel.refreshServerOnlineStatus()
+    }
     val plansViewModel: PlansViewModel = viewModel(
         factory = PlansViewModel.factory(
             planRepository = appContainer.planRepository,
@@ -152,19 +148,6 @@ fun NasBoxApp(
             }
         },
     ) { innerPadding ->
-        val layoutDirection = LocalLayoutDirection.current
-        val contentPadding = remember(innerPadding, showBottomBar, layoutDirection) {
-            if (showBottomBar) {
-                PaddingValues(
-                    start = innerPadding.calculateStartPadding(layoutDirection),
-                    top = innerPadding.calculateTopPadding(),
-                    end = innerPadding.calculateEndPadding(layoutDirection),
-                    bottom = 0.dp,
-                )
-            } else {
-                innerPadding
-            }
-        }
         LaunchedEffect(openRunId) {
             val runId = openRunId ?: return@LaunchedEffect
             if (runId > 0L) {
@@ -176,7 +159,7 @@ fun NasBoxApp(
             startDestination = ROUTE_DASHBOARD,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding),
+                .padding(innerPadding),
         ) {
             composable(ROUTE_DASHBOARD) {
                 DashboardScreen(
@@ -204,6 +187,7 @@ fun NasBoxApp(
                         serverRepository = appContainer.serverRepository,
                         runRepository = appContainer.runRepository,
                         runLogRepository = appContainer.runLogRepository,
+                        backupRecordRepository = appContainer.backupRecordRepository,
                     ),
                 )
                 DashboardRunDetailScreen(

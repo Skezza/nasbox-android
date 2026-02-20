@@ -267,7 +267,7 @@ private fun NextScheduledRunCard(nextRun: DashboardNextScheduledRun?) {
             Text("Next scheduled job", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (nextRun == null) {
                 Text(
-                    "No schedules are enabled.",
+                    "No jobs are scheduled to run.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
@@ -287,7 +287,7 @@ private fun NextScheduledRunCard(nextRun: DashboardNextScheduledRun?) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    nextRun.scheduleSummary,
+                    dashboardScheduleSummaryLabel(nextRun.scheduleSummary),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -301,6 +301,25 @@ private fun NextScheduledRunCard(nextRun: DashboardNextScheduledRun?) {
             }
         }
     }
+}
+
+private fun dashboardScheduleSummaryLabel(summary: String): String {
+    val markers = listOf(" at ", " around ")
+    val (markerIndex, marker) = markers
+        .asSequence()
+        .mapNotNull { markerText ->
+            val index = summary.indexOf(markerText)
+            if (index >= 0) index to markerText else null
+        }
+        .minByOrNull { it.first }
+        ?: return summary
+
+    val prefix = summary.substring(0, markerIndex).trimEnd()
+    val remainder = summary.substring(markerIndex + marker.length).trimStart()
+    val separatorIndex = remainder.indexOf(' ')
+    val suffix = if (separatorIndex >= 0) remainder.substring(separatorIndex) else ""
+
+    return if (suffix.isBlank()) prefix else "$prefix$suffix"
 }
 
 @Composable
@@ -421,7 +440,7 @@ private fun RecentRunsCard(
         ) {
             Text("Recent runs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (runs.isEmpty()) {
-                Text("No completed runs yet.", style = MaterialTheme.typography.bodyMedium)
+                Text("No recent runs.", style = MaterialTheme.typography.bodyMedium)
             } else {
                 runs.forEach { run ->
                     val statusText = statusLabel(run.status)

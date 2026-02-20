@@ -245,8 +245,8 @@ class DashboardViewModel(
         if (recentRuns.isEmpty()) {
             return DashboardRunHealth(
                 level = RunHealthLevel.HEALTHY,
-                title = "No jobs have run yet",
-                detail = "Run a backup to start archiving files.",
+                title = "No jobs have run",
+                detail = "Run a job to start archiving files.",
             )
         }
 

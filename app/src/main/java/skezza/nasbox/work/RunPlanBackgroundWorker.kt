@@ -149,6 +149,18 @@ class RunPlanBackgroundWorker(
                         return@coroutineScope
                     }
 
+                    keepAliveJob?.cancel()
+                    if (result.status == RunStatus.SUCCESS) {
+                        RunWorkerNotifications.postCompletionNotification(
+                            context = applicationContext,
+                            planId = planId,
+                            runId = result.runId,
+                            planName = planName,
+                            uploadedCount = result.uploadedCount,
+                            skippedCount = result.skippedCount,
+                            failedCount = result.failedCount,
+                        )
+                    }
                     if (result.status in ISSUE_STATUSES) {
                         RunWorkerNotifications.postIssueNotification(
                             context = applicationContext,

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.widthIn
@@ -62,6 +61,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 import skezza.nasbox.ui.common.ErrorHint
 import skezza.nasbox.ui.common.LoadState
@@ -111,7 +111,6 @@ fun VaultScreen(
                     showDiscoveryDialog = true
                     viewModel.discoverServers()
                 },
-                modifier = Modifier.padding(bottom = 130.dp),
             ) {
                 Icon(Icons.Default.TravelExplore, contentDescription = "Discover servers")
             }
@@ -175,7 +174,7 @@ fun VaultScreen(
                 ) {
                     StateCard(
                         title = "No servers yet",
-                        description = "Add your first NAS destination to start backing up photos.",
+                        description = "Add your first server or share, or press Discover in the bottom right to scan for SMB hosts.",
                         actionLabel = "Add server",
                         onAction = onAddServer,
                     )
@@ -222,9 +221,7 @@ fun VaultScreen(
                                         enabled = !server.isTesting,
                                     ) {
                                         Icon(Icons.Default.NetworkCheck, contentDescription = null)
-                                        Text(
-                                            if (server.isTesting) "Testing..." else "Test",
-                                            modifier = Modifier.padding(start = 8.dp),
+                                        Text("Test", modifier = Modifier.padding(start = 8.dp),
                                         )
                                     }
                                 }
@@ -273,6 +270,7 @@ fun ServerEditorScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -292,39 +290,42 @@ fun ServerEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .navigationBarsPadding()
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             ServerField(
-                fieldName = "Name",
+                labelText = "Name",
+                placeholderText = "Home NAS",
                 value = state.name,
                 error = state.validation.nameError,
-                helperText = "Name (e.g., Home NAS).",
+                helperText = "Friendly label shown in lists.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.NAME, it)
             }
             ServerField(
-                fieldName = "Host",
+                labelText = "Host",
+                placeholderText = "smb://example.local",
                 value = state.host,
                 error = state.validation.hostError,
-                helperText = "Host (e.g., smb://example.local/photos).",
+                helperText = "SMB endpoint URL or hostname.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.HOST, it)
             }
             ServerField(
-                fieldName = "Share",
+                labelText = "Share",
+                placeholderText = "share-name",
                 value = state.shareName,
                 error = state.validation.shareNameError,
-                helperText = "Share (optional; append to the host, e.g., smb://host/share).",
+                helperText = "Share name hosted by the server.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.SHARE, it)
             }
             ServerField(
-                fieldName = "Base path",
+                labelText = "Base path",
+                placeholderText = "Media/Photos",
                 value = state.basePath,
                 error = state.validation.basePathError,
-                helperText = "Base path (optional subfolder).",
+                helperText = "Optional path relative to the share.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.BASE_PATH, it)
             }
@@ -336,32 +337,35 @@ fun ServerEditorScreen(
                 Text("Browse share and folder", modifier = Modifier.padding(start = 8.dp))
             }
             ServerField(
-                fieldName = "Domain / workgroup",
+                labelText = "Domain / workgroup",
+                placeholderText = "WORKGROUP",
                 value = state.domain,
                 error = null,
-                helperText = "Domain (optional, e.g., WORKGROUP).",
+                helperText = "Optional domain/workgroup for SMB auth.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.DOMAIN, it)
             }
             ServerField(
-                fieldName = "Username",
+                labelText = "Username",
+                placeholderText = "nasuser",
                 value = state.username,
                 error = state.validation.usernameError,
-                helperText = "Username (required for authenticated access).",
+                helperText = "Required if the share needs credentials.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.USERNAME, it)
             }
             ServerField(
-                fieldName = "Password",
+                labelText = "Password",
+                placeholderText = "••••••",
                 value = state.password,
                 error = state.validation.passwordError,
                 isPassword = true,
-                helperText = "Password (leave blank for guest access).",
+                helperText = "Leave blank for guest access.",
             ) {
                 viewModel.updateEditorField(ServerEditorField.PASSWORD, it)
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.weight(1f, fill = true))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveServer(onNavigateBack) }) {
@@ -374,14 +378,15 @@ fun ServerEditorScreen(
                     Text(if (state.isTestingConnection) "Testing..." else "Test connection")
                 }
             }
-            Spacer(modifier = Modifier.height(30.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
 
 @Composable
 private fun ServerField(
-    fieldName: String,
+    labelText: String,
+    placeholderText: String? = null,
     value: String,
     error: String?,
     helperText: String? = null,
@@ -391,7 +396,8 @@ private fun ServerField(
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        placeholder = { Text(fieldName) },
+        label = { Text(labelText) },
+        placeholder = placeholderText?.let { { Text(it) } },
         isError = error != null,
         singleLine = true,
         visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
@@ -507,7 +513,22 @@ private fun BrowseDestinationDialog(
                         }
                     }
                 }
-                if (state.isLoading) {
+                val shouldShowLoadingLabel = state.isLoading && when {
+                    state.selectedShare.isBlank() -> state.shares.isEmpty()
+                    else -> state.directories.isEmpty()
+                }
+                var showLoadingLabel by remember { mutableStateOf(false) }
+                LaunchedEffect(shouldShowLoadingLabel) {
+                    if (!shouldShowLoadingLabel) {
+                        showLoadingLabel = false
+                        return@LaunchedEffect
+                    }
+                    delay(200)
+                    if (shouldShowLoadingLabel) {
+                        showLoadingLabel = true
+                    }
+                }
+                if (showLoadingLabel) {
                     Text("Loading...")
                 }
                 if (!state.errorMessage.isNullOrBlank()) {

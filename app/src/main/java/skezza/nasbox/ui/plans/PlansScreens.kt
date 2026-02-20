@@ -12,10 +12,12 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -170,16 +172,15 @@ fun PlansScreen(
             }
             planListState.plans.isEmpty() -> {
                 Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(24.dp)
-                    .offset(y = (-48).dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(24.dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
                     StateCard(
                         title = "No jobs yet",
-                        description = "Create a job to back up albums to your NAS.",
+                        description = "Create a job to start transferring data.",
                         actionLabel = "Add job",
                         onAction = onAddPlan,
                     )
@@ -190,6 +191,7 @@ fun PlansScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
+                        .imePadding()
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -313,6 +315,7 @@ fun PlanEditorScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(if (planId == null) "New Job" else "Edit Job") },
@@ -330,6 +333,7 @@ fun PlanEditorScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
+                .imePadding()
                 .verticalScroll(editorScrollState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -528,9 +532,12 @@ fun PlanEditorScreen(
             )
             Text("Schedule: $scheduleHint")
 
+            Spacer(modifier = Modifier.weight(1f, fill = true))
+
             Button(onClick = { viewModel.savePlan(onNavigateBack) }) {
                 Text(if (planId == null) "Create job" else "Save job")
             }
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
