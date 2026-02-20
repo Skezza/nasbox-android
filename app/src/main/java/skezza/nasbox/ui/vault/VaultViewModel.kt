@@ -508,9 +508,6 @@ class VaultViewModel(
                     isScanning = false,
                     errorMessage = null,
                 )
-                if (servers.isEmpty()) {
-                    _message.value = "No SMB servers discovered. On Android emulators, LAN/mDNS discovery is often blocked by NAT. Try on a physical device or enter smb://quanta.local/<share> manually."
-                }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Throwable) {

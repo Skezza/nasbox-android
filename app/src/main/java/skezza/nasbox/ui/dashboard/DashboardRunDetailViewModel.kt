@@ -117,9 +117,15 @@ class DashboardRunDetailViewModel(
         )
 
         val reachedProgress = mutableSetOf<Int>()
+        var scanCompleteLogged = false
         logsAscending.forEach { log ->
             when (log.message) {
-                MESSAGE_SCAN_COMPLETE -> milestones += DashboardRunDetailMilestone("Scan complete", log.timestampEpochMs)
+                MESSAGE_SCAN_COMPLETE -> {
+                    if (!scanCompleteLogged) {
+                        scanCompleteLogged = true
+                        milestones += DashboardRunDetailMilestone("Scan complete", log.timestampEpochMs)
+                    }
+                }
                 MESSAGE_STOP_REQUESTED -> milestones += DashboardRunDetailMilestone("Stop requested", log.timestampEpochMs)
                 MESSAGE_CANCELLATION_ACKNOWLEDGED ->
                     milestones += DashboardRunDetailMilestone("Cancel acknowledged", log.timestampEpochMs)
@@ -127,8 +133,6 @@ class DashboardRunDetailViewModel(
                     milestones += DashboardRunDetailMilestone("Interrupted", log.timestampEpochMs)
                 MESSAGE_FINALIZED_CANCELED ->
                     milestones += DashboardRunDetailMilestone("Recovered as canceled", log.timestampEpochMs)
-                MESSAGE_CHUNK_PAUSED ->
-                    milestones += DashboardRunDetailMilestone("Chunk paused for system window", log.timestampEpochMs)
                 MESSAGE_FINISHED -> {
                     val finishedLabel = statusLabelFromRunFinishedDetail(log.detail)
                     milestones += DashboardRunDetailMilestone(finishedLabel, log.timestampEpochMs)
@@ -145,7 +149,7 @@ class DashboardRunDetailViewModel(
                 }
                 else -> {
                     if (log.message.startsWith(MESSAGE_RESUMED_ATTEMPT_PREFIX)) {
-                        milestones += DashboardRunDetailMilestone(log.message, log.timestampEpochMs)
+                        // deliberately ignore resumed attempt messages for milestones
                     }
                 }
             }

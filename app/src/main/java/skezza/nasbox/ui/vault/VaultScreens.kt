@@ -221,9 +221,7 @@ fun VaultScreen(
                                         enabled = !server.isTesting,
                                     ) {
                                         Icon(Icons.Default.NetworkCheck, contentDescription = null)
-                                        Text(
-                                            if (server.isTesting) "Testing..." else "Test",
-                                            modifier = Modifier.padding(start = 8.dp),
+                                        Text("Test", modifier = Modifier.padding(start = 8.dp),
                                         )
                                     }
                                 }
