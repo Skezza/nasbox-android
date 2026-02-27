@@ -6,8 +6,6 @@ The app is built with Kotlin, Jetpack Compose, Room, WorkManager, and SMBJ. It s
 
 ## Visuals
 
-![NASBox feature graphic](app/src/main/playstore/feature_graphic_1024x500.png)
-
 <p align="center">
   <img src="app/src/main/playstore/icon_512.png" alt="NASBox app icon" width="160" />
 </p>
