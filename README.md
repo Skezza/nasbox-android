@@ -10,7 +10,7 @@ Developing NASBox was an opportunity to test the latest Codex 5.3 and also get s
 - ✅ Phase 1 complete: persistence foundation (Room entities, DAOs, repository abstractions) is implemented.
 - ✅ Phase 2 complete: credential security and server management are implemented.
 - ✅ Phase 3 complete: SMB connection testing, error mapping, and server test actions are implemented.
-- ℹ️ Server host input accepts either raw host (`quanta.local`) or SMB URI form (`smb://quanta.local/share`) for connection testing.
+- ℹ️ Server host input accepts either raw host (`example.local`) or SMB URI form (`smb://example.local/share`) for connection testing.
 - ℹ️ The server editor now exposes an optional Domain/Workgroup field (e.g., `WORKGROUP`) used for SMB authentication during share browse enumeration.
 - ✅ Phase 4 complete: MediaStore album integration, runtime photo permission flow, and full plan management are implemented.
 - ✨ Plans now support **Photo Album** and **General Folder** source types, optional video inclusion for album plans, optional album templating, and a full-phone backup preset for shared storage.
@@ -39,12 +39,12 @@ See:
 
 ## SMB connection prerequisites
 
-The server list also provides a **Discover servers** action that scans the current Wi-Fi subnet for reachable SMB hosts, enriches host naming via mDNS service discovery (SMB/workstation/device-info records), then tries NetBIOS node-status name lookup for IP-only hits, and always merges common `.local` hostname probes (including `samba.local` and `quanta.local`) so hostname hits can override IP-only entries when they resolve.
+The server list also provides a **Discover servers** action that scans the current Wi-Fi subnet for reachable SMB hosts, enriches host naming via mDNS service discovery (SMB/workstation/device-info records), then tries NetBIOS node-status name lookup for IP-only hits, and always merges common `.local` hostname probes (including `samba.local` and `nas.local`) so hostname hits can override IP-only entries when they resolve.
 
 - App manifest must include `android.permission.INTERNET` for SMB socket connectivity.
 - `android.permission.ACCESS_NETWORK_STATE` is included so network availability diagnostics can be surfaced in UX improvements.
 - `android.permission.CHANGE_WIFI_MULTICAST_STATE` is used so mDNS discovery can acquire multicast lock reliably on Android devices.
-- For mDNS hosts like `quanta.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
+- For mDNS hosts like `example.local`, ensure your device can resolve local hostnames on the current Wi-Fi network.
 - Discovery reliability is lower on Android emulators because guest networking (NAT) may block broadcast/mDNS/LAN reachability; prefer testing discovery on a physical device.
 - Share enumeration within **Browse destination** now runs two SMB2/3-compatible paths: first SRVSVC `NetShareEnum` over SMBJ RPC (`IPC$`), then SMBJ `listShares` when RPC yields no data.
 

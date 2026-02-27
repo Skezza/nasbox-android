@@ -21,7 +21,7 @@ class BrowseSmbDestinationUseCase(
         if (parsedTarget is ParsedSmbTargetResult.Error) {
             return SmbBrowseResult.Failure(
                 message = parsedTarget.message,
-                recoveryHint = "Use host like quanta.local or smb://quanta.local/share.",
+                recoveryHint = "Use host like example.local or smb://example.local/share.",
             )
         }
         val target = (parsedTarget as ParsedSmbTargetResult.Success).target

@@ -30,7 +30,7 @@ class ValidateServerInputUseCaseTest {
         val result = useCase(
             ServerInput(
                 name = "Home NAS",
-                host = "quanta.local",
+                host = "example.local",
                 shareName = "photos",
                 basePath = "backup",
                 username = "",
@@ -48,7 +48,7 @@ class ValidateServerInputUseCaseTest {
         val result = useCase(
             ServerInput(
                 name = "Home NAS",
-                host = "quanta.local",
+                host = "example.local",
                 shareName = "photos",
                 basePath = "backup",
                 username = "admin",
@@ -65,7 +65,7 @@ class ValidateServerInputUseCaseTest {
         val result = useCase(
             ServerInput(
                 name = "Home NAS",
-                host = "smb://quanta.local/photos",
+                host = "smb://example.local/photos",
                 shareName = "",
                 basePath = "backup",
                 username = "user",
@@ -81,7 +81,7 @@ class ValidateServerInputUseCaseTest {
         val result = useCase(
             ServerInput(
                 name = "Home NAS",
-                host = "quanta.local",
+                host = "example.local",
                 shareName = "",
                 basePath = "backup",
                 username = "user",

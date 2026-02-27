@@ -67,7 +67,7 @@ class TestSmbConnectionUseCase(
             return SmbConnectionUiResult.failure(
                 category = SmbErrorCategory.UNKNOWN,
                 message = parsedTarget.message,
-                recoveryHint = "Use host like quanta.local (or smb://quanta.local/share) and verify share.",
+                recoveryHint = "Use host like example.local (or smb://example.local/share) and verify share.",
             )
         }
 

@@ -318,7 +318,6 @@ class AndroidSmbServerDiscoveryScanner(
             "fileserver.local",
             "storage.local",
             "homeserver.local",
-            "quanta.local",
         )
     }
 

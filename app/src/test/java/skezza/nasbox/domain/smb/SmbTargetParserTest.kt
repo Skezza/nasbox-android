@@ -8,28 +8,28 @@ class SmbTargetParserTest {
 
     @Test
     fun parse_supportsProtocolAndShareInHost() {
-        val result = SmbTargetParser.parse("smb://quanta.local/photos", "")
+        val result = SmbTargetParser.parse("smb://example.local/photos", "")
         assertTrue(result is ParsedSmbTargetResult.Success)
         val target = (result as ParsedSmbTargetResult.Success).target
-        assertEquals("quanta.local", target.host)
+        assertEquals("example.local", target.host)
         assertEquals("photos", target.shareName)
     }
 
     @Test
     fun parse_allowsHostWithoutShareForRootValidation() {
-        val result = SmbTargetParser.parse("quanta.local", "")
+        val result = SmbTargetParser.parse("example.local", "")
         assertTrue(result is ParsedSmbTargetResult.Success)
         val target = (result as ParsedSmbTargetResult.Success).target
-        assertEquals("quanta.local", target.host)
+        assertEquals("example.local", target.host)
         assertEquals("", target.shareName)
     }
 
     @Test
     fun parse_supportsSeparateShareAndTrailingSlash() {
-        val result = SmbTargetParser.parse("smb://quanta.local/", "photos")
+        val result = SmbTargetParser.parse("smb://example.local/", "photos")
         assertTrue(result is ParsedSmbTargetResult.Success)
         val target = (result as ParsedSmbTargetResult.Success).target
-        assertEquals("quanta.local", target.host)
+        assertEquals("example.local", target.host)
         assertEquals("photos", target.shareName)
     }
 }
