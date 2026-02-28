@@ -3,6 +3,7 @@ package skezza.nasbox.data.smb
 import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
+import com.hierynomus.msfscc.fileinformation.FileStandardInformation
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2CreateOptions
 import com.hierynomus.mssmb2.SMB2ShareAccess
@@ -10,9 +11,11 @@ import com.hierynomus.protocol.commons.buffer.Buffer
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.share.DiskShare
+import java.io.IOException
 import java.io.InputStream
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.MessageDigest
 import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -205,26 +208,61 @@ class SmbjClient : SmbClient {
                             (share as? DiskShare)?.use { diskShare ->
                                 val normalizedPath = remotePath.replace("\\", "/").trim('/')
                                 ensureDirectories(diskShare, normalizedPath)
-                                val file = diskShare.openFile(
-                                    normalizedPath.replace('/', '\\'),
+                                val finalSmbPath = normalizedPath.replace('/', '\\')
+                                val tempSmbPath = temporaryUploadPath(finalSmbPath)
+                                var renamedToFinalPath = false
+                                diskShare.openFile(
+                                    tempSmbPath,
                                     setOf(AccessMask.GENERIC_WRITE),
                                     setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
                                     setOf(SMB2ShareAccess.FILE_SHARE_READ),
                                     SMB2CreateDisposition.FILE_OVERWRITE_IF,
                                     setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-                                )
-                                file.outputStream.use { output ->
-                                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                                    var totalWritten = 0L
-                                    while (true) {
-                                        val read = inputStream.read(buffer)
-                                        if (read <= 0) break
-                                        output.write(buffer, 0, read)
-                                        totalWritten += read
-                                        onProgressBytes(totalWritten)
+                                ).use { file ->
+                                    try {
+                                        val digest = MessageDigest.getInstance("MD5")
+                                        var totalWritten = 0L
+                                        file.outputStream.use { output ->
+                                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                            while (true) {
+                                                val read = inputStream.read(buffer)
+                                                if (read <= 0) break
+                                                output.write(buffer, 0, read)
+                                                totalWritten += read
+                                                digest.update(buffer, 0, read)
+                                                onProgressBytes(totalWritten)
+                                            }
+                                            output.flush()
+                                            if (contentLengthBytes != null && totalWritten != contentLengthBytes) {
+                                                throw IOException(
+                                                    "Upload truncated for $remotePath: wrote $totalWritten of $contentLengthBytes bytes.",
+                                                )
+                                            }
+                                            Log.i(LOG_TAG, "uploadFile staged path=$remotePath bytes=$totalWritten")
+                                        }
+                                        val localMd5 = digest.digest().toHexString()
+                                        verifyStagedUpload(
+                                            diskShare = diskShare,
+                                            tempSmbPath = tempSmbPath,
+                                            expectedSizeBytes = totalWritten,
+                                            expectedMd5 = localMd5,
+                                            remotePath = remotePath,
+                                        )
+                                        file.rename(finalSmbPath, true)
+                                        renamedToFinalPath = true
+                                        Log.i(LOG_TAG, "uploadFile complete path=$remotePath")
+                                    } catch (throwable: Throwable) {
+                                        if (!renamedToFinalPath) {
+                                            runCatching { diskShare.rm(tempSmbPath) }
+                                                .onFailure {
+                                                    Log.w(
+                                                        LOG_TAG,
+                                                        "uploadFile temp cleanup failed path=$tempSmbPath reason=${it.message}",
+                                                    )
+                                                }
+                                        }
+                                        throw throwable
                                     }
-                                    output.flush()
-                                    Log.i(LOG_TAG, "uploadFile complete path=$remotePath bytes=$totalWritten")
                                 }
                             } ?: error("Connected share is not a disk share")
                             share.close()
@@ -251,6 +289,59 @@ class SmbjClient : SmbClient {
                 share.mkdir(current)
             }
         }
+    }
+
+    private fun temporaryUploadPath(remotePath: String): String {
+        val lastSeparatorIndex = remotePath.lastIndexOf('\\')
+        val directory = if (lastSeparatorIndex >= 0) remotePath.substring(0, lastSeparatorIndex + 1) else ""
+        val filename = if (lastSeparatorIndex >= 0) remotePath.substring(lastSeparatorIndex + 1) else remotePath
+        return "$directory.$filename.nasbox-uploading"
+    }
+
+    private fun verifyStagedUpload(
+        diskShare: DiskShare,
+        tempSmbPath: String,
+        expectedSizeBytes: Long,
+        expectedMd5: String,
+        remotePath: String,
+    ) {
+        val remoteMd5 = diskShare.openFile(
+            tempSmbPath,
+            setOf(AccessMask.GENERIC_READ),
+            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+            setOf(SMB2ShareAccess.FILE_SHARE_READ),
+            SMB2CreateDisposition.FILE_OPEN,
+            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+        ).use { stagedFile ->
+            val remoteSizeBytes = stagedFile.getFileInformation(FileStandardInformation::class.java).endOfFile
+            if (remoteSizeBytes != expectedSizeBytes) {
+                throw IOException(
+                    "Remote size mismatch for $remotePath: expected $expectedSizeBytes bytes but found $remoteSizeBytes bytes.",
+                )
+            }
+            stagedFile.inputStream.use { input ->
+                md5(input)
+            }
+        }
+        if (remoteMd5 != expectedMd5) {
+            throw IOException("Remote checksum mismatch for $remotePath after upload verification.")
+        }
+        Log.i(LOG_TAG, "uploadFile verified path=$remotePath bytes=$expectedSizeBytes")
+    }
+
+    private fun md5(inputStream: InputStream): String {
+        val digest = MessageDigest.getInstance("MD5")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = inputStream.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+        return digest.digest().toHexString()
+    }
+
+    private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
     }
 }
 
