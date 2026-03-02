@@ -261,6 +261,40 @@ fun PlansScreen(
                                         Text("Delete", modifier = Modifier.padding(start = 6.dp))
                                     }
                                 }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    FilterChip(
+                                        selected = plan.checksumVerificationEnabled,
+                                        onClick = {
+                                            viewModel.togglePlanChecksumVerification(
+                                                planId = plan.planId,
+                                                enabled = !plan.checksumVerificationEnabled,
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                if (plan.checksumVerificationEnabled) {
+                                                    "Checksum: On"
+                                                } else {
+                                                    "Checksum: Off"
+                                                },
+                                            )
+                                        },
+                                    )
+                                    if (plan.enabled && plan.scheduleEnabled && plan.checksumVerificationEnabled) {
+                                        OutlinedButton(
+                                            onClick = { viewModel.togglePendingScheduledVerify(plan.planId) },
+                                        ) {
+                                            Text(if (plan.pendingScheduledVerify) "Verify Queued" else "Schedule Verify")
+                                        }
+                                    }
+                                }
+                                if (plan.pendingScheduledVerify) {
+                                    Text("Next auto-run will audit stored checksums.")
+                                }
                             }
                         }
                     }
@@ -462,6 +496,16 @@ fun PlanEditorScreen(
                     onCheckedChange = viewModel::updateEditorProgressNotificationEnabled,
                 )
             }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Verify new uploads with checksum")
+                Switch(
+                    checked = editorState.checksumVerificationEnabled,
+                    onCheckedChange = viewModel::updateEditorChecksumVerificationEnabled,
+                )
+            }
+            Text("Reads each new upload back from the NAS to compare MD5 before accepting it. Slower, but safer.")
+            Text("This verifies only newly uploaded files. Use Schedule Verify on the Jobs page to re-check previously verified backups on the next auto-run.")
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Auto-run")

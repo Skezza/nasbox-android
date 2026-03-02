@@ -64,6 +64,8 @@ class NasBoxDatabaseTest {
         assertEquals(1, plans.size)
         assertEquals(planId, plans.first().planId)
         assertEquals(serverId, plans.first().serverId)
+        assertEquals(false, plans.first().checksumVerificationEnabled)
+        assertEquals(false, plans.first().pendingScheduledVerify)
     }
 
     @Test
@@ -115,6 +117,56 @@ class NasBoxDatabaseTest {
         }
 
         assertTrue(duplicateRejected)
+    }
+
+    @Test
+    fun backupRecordChecksumFields_canBeStoredAndRead() = runBlocking {
+        val serverId = database.serverDao().insert(
+            ServerEntity(
+                name = "Server Four",
+                host = "host",
+                shareName = "share",
+                basePath = "root",
+                domain = "",
+                username = "name",
+                credentialAlias = "vault/four",
+            ),
+        )
+        val planId = database.planDao().insert(
+            PlanEntity(
+                name = "Plan D",
+                sourceAlbum = "Camera",
+                serverId = serverId,
+                directoryTemplate = "{year}",
+                filenamePattern = "{mediaId}.{ext}",
+                enabled = true,
+                checksumVerificationEnabled = true,
+                pendingScheduledVerify = true,
+            ),
+        )
+
+        database.backupRecordDao().insert(
+            BackupRecordEntity(
+                planId = planId,
+                mediaItemId = "media-2",
+                remotePath = "folder/media-2.jpg",
+                uploadedAtEpochMs = 5L,
+                verifiedSizeBytes = 10L,
+                checksumAlgorithm = "MD5",
+                checksumValue = "abcd",
+                checksumVerifiedAtEpochMs = 6L,
+            ),
+        )
+
+        val storedPlan = database.planDao().getById(planId)
+        val storedRecord = database.backupRecordDao().getByPlanAndMediaItem(planId, "media-2")
+
+        assertEquals(true, storedPlan?.checksumVerificationEnabled)
+        assertEquals(true, storedPlan?.pendingScheduledVerify)
+        assertEquals(10L, storedRecord?.verifiedSizeBytes)
+        assertEquals("MD5", storedRecord?.checksumAlgorithm)
+        assertEquals("abcd", storedRecord?.checksumValue)
+        assertEquals(6L, storedRecord?.checksumVerifiedAtEpochMs)
     }
 
     @Test

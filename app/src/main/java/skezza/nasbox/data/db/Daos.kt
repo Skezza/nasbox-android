@@ -48,11 +48,37 @@ interface BackupRecordDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(record: BackupRecordEntity): Long
 
+    @Update
+    suspend fun update(record: BackupRecordEntity)
+
     @Query("SELECT * FROM backup_records WHERE plan_id = :planId AND media_item_id = :mediaItemId")
     suspend fun getByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity?
 
     @Query("SELECT * FROM backup_records WHERE plan_id = :planId AND media_item_id IN (:mediaItemIds)")
     suspend fun getByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity>
+
+    @Query(
+        """
+        SELECT * FROM backup_records
+        WHERE plan_id = :planId
+          AND checksum_value IS NOT NULL
+          AND checksum_algorithm = 'MD5'
+          AND record_id > :afterRecordId
+        ORDER BY record_id
+        LIMIT :limit
+        """,
+    )
+    suspend fun getChecksummedByPlanPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM backup_records
+        WHERE plan_id = :planId
+          AND checksum_value IS NOT NULL
+          AND checksum_algorithm = 'MD5'
+        """,
+    )
+    suspend fun countChecksummedByPlan(planId: Long): Int
 }
 
 @Dao

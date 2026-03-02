@@ -59,14 +59,19 @@ class DefaultPlanRepository(
 
 interface BackupRecordRepository {
     suspend fun create(record: BackupRecordEntity): Long
+    suspend fun update(record: BackupRecordEntity)
     suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity?
     suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity>
+    suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
+    suspend fun countChecksummed(planId: Long): Int
 }
 
 class DefaultBackupRecordRepository(
     private val backupRecordDao: BackupRecordDao,
 ) : BackupRecordRepository {
     override suspend fun create(record: BackupRecordEntity): Long = backupRecordDao.insert(record)
+
+    override suspend fun update(record: BackupRecordEntity) = backupRecordDao.update(record)
 
     override suspend fun findByPlanAndMediaItem(
         planId: Long,
@@ -84,6 +89,13 @@ class DefaultBackupRecordRepository(
                 backupRecordDao.getByPlanAndMediaItems(planId, mediaIdChunk)
             }
     }
+
+    override suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> {
+        if (limit <= 0) return emptyList()
+        return backupRecordDao.getChecksummedByPlanPage(planId, afterRecordId, limit)
+    }
+
+    override suspend fun countChecksummed(planId: Long): Int = backupRecordDao.countChecksummedByPlan(planId)
 
     private companion object {
         const val BACKUP_RECORD_MEDIA_ID_CHUNK_SIZE = 900

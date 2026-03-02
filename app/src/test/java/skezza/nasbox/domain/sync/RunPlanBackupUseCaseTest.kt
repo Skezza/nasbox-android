@@ -29,6 +29,8 @@ import skezza.nasbox.data.security.CredentialStore
 import skezza.nasbox.data.smb.SmbClient
 import skezza.nasbox.data.smb.SmbConnectionRequest
 import skezza.nasbox.data.smb.SmbConnectionResult
+import skezza.nasbox.data.smb.RemoteVerifyResult
+import skezza.nasbox.data.smb.UploadFileResult
 
 class RunPlanBackupUseCaseTest {
 
@@ -111,6 +113,101 @@ class RunPlanBackupUseCaseTest {
         assertTrue(
             mediaDataSource.albumRequests.any { it.first == plan.sourceAlbum && it.second },
         )
+    }
+
+    @Test
+    fun invoke_storesChecksumMetadataForVerifiedUploads() = runBlocking {
+        val plan = PlanEntity(
+            planId = 12,
+            name = "Camera",
+            sourceAlbum = "album-1",
+            serverId = 20,
+            directoryTemplate = "",
+            filenamePattern = "",
+            enabled = true,
+            checksumVerificationEnabled = true,
+        )
+
+        val backupRepo = FakeBackupRecordRepository(existingMediaItemId = "none")
+        val smbClient = FakeSmbClient()
+
+        runUseCase(
+            plan = plan,
+            server = baseServer(),
+            backupRepo = backupRepo,
+            runRepo = FakeRunRepository(),
+            logRepo = FakeRunLogRepository(),
+            mediaDataSource = FakeMediaStoreDataSource(
+                albumItems = listOf(
+                    MediaImageItem("1", "album-1", "one.jpg", "image/jpeg", 1_700_000_000_000, 4),
+                ),
+            ),
+            smbClient = smbClient,
+        )(plan.planId)
+
+        val record = backupRepo.createdRecords.single()
+        assertTrue(smbClient.uploadVerifyFlags.single())
+        assertEquals(4L, record.verifiedSizeBytes)
+        assertEquals("MD5", record.checksumAlgorithm)
+        assertEquals("fake_upload_checksum", record.checksumValue)
+        assertEquals(1_500L, record.checksumVerifiedAtEpochMs)
+    }
+
+    @Test
+    fun invoke_scheduledVerify_updatesExistingChecksumsAndClearsPendingFlag() = runBlocking {
+        val planRepository = FakePlanRepository(
+            PlanEntity(
+                planId = 13,
+                name = "Camera",
+                sourceAlbum = "album-1",
+                serverId = 20,
+                directoryTemplate = "",
+                filenamePattern = "",
+                enabled = true,
+                scheduleEnabled = true,
+                checksumVerificationEnabled = true,
+                pendingScheduledVerify = true,
+            ),
+        )
+        val backupRepo = FakeBackupRecordRepository(
+            existingMediaItemId = "none",
+            seedRecords = listOf(
+                BackupRecordEntity(
+                    recordId = 10L,
+                    planId = 13L,
+                    mediaItemId = "media-1",
+                    remotePath = "photos/Camera/one.jpg",
+                    uploadedAtEpochMs = 100L,
+                    verifiedSizeBytes = 4L,
+                    checksumAlgorithm = "MD5",
+                    checksumValue = "seed_checksum",
+                    checksumVerifiedAtEpochMs = 200L,
+                ),
+            ),
+        )
+        val smbClient = FakeSmbClient()
+        val useCase = RunPlanBackupUseCase(
+            planRepository = planRepository,
+            serverRepository = FakeServerRepository(baseServer()),
+            backupRecordRepository = backupRepo,
+            runRepository = FakeRunRepository(),
+            runLogRepository = FakeRunLogRepository(),
+            credentialStore = FakeCredentialStore("pw"),
+            mediaStoreDataSource = FakeMediaStoreDataSource(albumItems = emptyList()),
+            smbClient = smbClient,
+            nowEpochMs = { 1000L },
+        )
+
+        val result = useCase(
+            planId = 13L,
+            triggerSource = RunTriggerSource.SCHEDULED,
+            executionMode = RunExecutionMode.BACKGROUND,
+        )
+
+        assertEquals(RunStatus.SUCCESS, result.status)
+        assertEquals(listOf("photos/Camera/one.jpg"), smbClient.verifiedRemotePaths)
+        assertEquals(false, planRepository.currentPlan.pendingScheduledVerify)
+        assertEquals(2_000L, backupRepo.updatedRecords.single().checksumVerifiedAtEpochMs)
     }
 
     @Test
@@ -620,12 +717,18 @@ class RunPlanBackupUseCaseTest {
     )
 
     private class FakePlanRepository(
-        private val plan: PlanEntity,
+        initialPlan: PlanEntity,
     ) : PlanRepository {
-        override fun observePlans(): Flow<List<PlanEntity>> = flowOf(listOf(plan))
-        override suspend fun getPlan(planId: Long): PlanEntity? = plan.takeIf { it.planId == planId }
+        val updates = mutableListOf<PlanEntity>()
+        var currentPlan: PlanEntity = initialPlan
+
+        override fun observePlans(): Flow<List<PlanEntity>> = flowOf(listOf(currentPlan))
+        override suspend fun getPlan(planId: Long): PlanEntity? = currentPlan.takeIf { it.planId == planId }
         override suspend fun createPlan(plan: PlanEntity): Long = plan.planId
-        override suspend fun updatePlan(plan: PlanEntity) = Unit
+        override suspend fun updatePlan(plan: PlanEntity) {
+            currentPlan = plan
+            updates += plan
+        }
         override suspend fun deletePlan(planId: Long) = Unit
     }
 
@@ -641,31 +744,66 @@ class RunPlanBackupUseCaseTest {
 
     private class FakeBackupRecordRepository(
         private val existingMediaItemId: String,
+        seedRecords: List<BackupRecordEntity> = emptyList(),
     ) : BackupRecordRepository {
         val createdRecords = mutableListOf<BackupRecordEntity>()
+        val updatedRecords = mutableListOf<BackupRecordEntity>()
+        private val recordsByMediaItemId = linkedMapOf<String, BackupRecordEntity>()
 
-        override suspend fun create(record: BackupRecordEntity): Long {
-            createdRecords += record
-            return createdRecords.size.toLong()
-        }
-
-        override suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity? {
-            return if (mediaItemId == existingMediaItemId) {
-                BackupRecordEntity(
+        init {
+            seedRecords.forEach { record ->
+                recordsByMediaItemId[record.mediaItemId] = record
+            }
+            if (existingMediaItemId != "none" && existingMediaItemId !in recordsByMediaItemId) {
+                recordsByMediaItemId[existingMediaItemId] = BackupRecordEntity(
                     recordId = 1,
-                    planId = planId,
-                    mediaItemId = mediaItemId,
+                    planId = 0,
+                    mediaItemId = existingMediaItemId,
                     remotePath = "existing",
                     uploadedAtEpochMs = 1,
                 )
-            } else {
-                null
             }
         }
 
+        override suspend fun create(record: BackupRecordEntity): Long {
+            val stored = record.copy(
+                recordId = record.recordId.takeIf { it > 0L } ?: (recordsByMediaItemId.size + createdRecords.size + 1).toLong(),
+            )
+            createdRecords += stored
+            recordsByMediaItemId[stored.mediaItemId] = stored
+            return stored.recordId
+        }
+
+        override suspend fun update(record: BackupRecordEntity) {
+            updatedRecords += record
+            recordsByMediaItemId[record.mediaItemId] = record
+        }
+
+        override suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity? {
+            return recordsByMediaItemId[mediaItemId]?.copy(planId = planId)
+        }
+
         override suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity> {
-            val existing = findByPlanAndMediaItem(planId, existingMediaItemId) ?: return emptyList()
-            return if (existingMediaItemId in mediaItemIds) listOf(existing) else emptyList()
+            return mediaItemIds.mapNotNull { mediaId ->
+                recordsByMediaItemId[mediaId]?.copy(planId = planId)
+            }
+        }
+
+        override suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> {
+            return recordsByMediaItemId.values
+                .asSequence()
+                .filter { it.planId == planId }
+                .filter { it.recordId > afterRecordId }
+                .filter { !it.checksumValue.isNullOrBlank() && it.checksumAlgorithm == "MD5" }
+                .sortedBy { it.recordId }
+                .take(limit)
+                .toList()
+        }
+
+        override suspend fun countChecksummed(planId: Long): Int {
+            return recordsByMediaItemId.values.count {
+                it.planId == planId && !it.checksumValue.isNullOrBlank() && it.checksumAlgorithm == "MD5"
+            }
         }
     }
 
@@ -803,6 +941,8 @@ class RunPlanBackupUseCaseTest {
 
     private class FakeSmbClient : SmbClient {
         val uploadedPaths = mutableListOf<String>()
+        val uploadVerifyFlags = mutableListOf<Boolean>()
+        val verifiedRemotePaths = mutableListOf<String>()
 
         override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
             SmbConnectionResult(1)
@@ -812,9 +952,17 @@ class RunPlanBackupUseCaseTest {
             remotePath: String,
             contentLengthBytes: Long?,
             inputStream: InputStream,
+            verifyChecksum: Boolean,
             onProgressBytes: (Long) -> Unit,
-        ) {
+        ): UploadFileResult {
             uploadedPaths += remotePath
+            uploadVerifyFlags += verifyChecksum
+            return UploadFileResult(
+                remoteSizeBytes = contentLengthBytes ?: 3L,
+                checksumAlgorithm = if (verifyChecksum) "MD5" else null,
+                checksumValue = if (verifyChecksum) "fake_upload_checksum" else null,
+                checksumVerifiedAtEpochMs = if (verifyChecksum) 1_500L else null,
+            )
         }
 
         override suspend fun listShares(host: String, username: String, password: String): List<String> = emptyList()
@@ -826,5 +974,21 @@ class RunPlanBackupUseCaseTest {
             username: String,
             password: String,
         ): List<String> = emptyList()
+
+        override suspend fun verifyRemoteFile(
+            request: SmbConnectionRequest,
+            remotePath: String,
+            expectedSizeBytes: Long,
+            expectedChecksumAlgorithm: String,
+            expectedChecksumValue: String,
+        ): RemoteVerifyResult {
+            verifiedRemotePaths += remotePath
+            return RemoteVerifyResult(
+                remoteSizeBytes = expectedSizeBytes,
+                checksumAlgorithm = expectedChecksumAlgorithm,
+                checksumValue = expectedChecksumValue.lowercase(),
+                verifiedAtEpochMs = 2_000L,
+            )
+        }
     }
 }

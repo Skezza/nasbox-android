@@ -265,8 +265,7 @@ class RunPlanBackupUseCase(
 
         finalizeCanceledIfRequested()?.let { return@withContext it }
 
-        val plan = planRepository.getPlan(planId)
-        if (plan == null) {
+        var plan = planRepository.getPlan(planId) ?: run {
             log(SEVERITY_ERROR, "Run aborted: plan does not exist", "planId=$planId")
             metric("run_interrupted", "reason=plan_missing")
             return@withContext finalizeRun(
@@ -390,15 +389,220 @@ class RunPlanBackupUseCase(
             password = password,
         )
         finalizeCanceledIfRequested()?.let { return@withContext it }
+        val shouldVerifyUploads = plan.checksumVerificationEnabled
+        val shouldResumeVerifyPhase = isVerifyContinuationCursor(currentCursor)
+        val shouldRunScheduledVerify = normalizedTriggerSource == RunTriggerSource.SCHEDULED &&
+            plan.pendingScheduledVerify &&
+            (currentCursor.isNullOrBlank() || shouldResumeVerifyPhase)
+        var completedScheduledVerifyAudit = false
+
+        suspend fun updatePlanPendingScheduledVerify(value: Boolean) {
+            if (plan.pendingScheduledVerify == value) return
+            val updatedPlan = plan.copy(pendingScheduledVerify = value)
+            planRepository.updatePlan(updatedPlan)
+            plan = updatedPlan
+        }
+
+        suspend fun pauseForContinuation(cursorValue: String): RunExecutionResult {
+            currentCursor = cursorValue
+            persistSnapshot(
+                phase = RunPhase.WAITING_RETRY,
+                continuationCursorValue = currentCursor,
+            )
+            metric("chunk_paused", "cursor=$currentCursor")
+            return RunExecutionResult(
+                runId = runIdValue,
+                status = RunStatus.RUNNING,
+                uploadedCount = uploadedCount,
+                skippedCount = skippedCount,
+                failedCount = failedCount,
+                summaryError = summaryError,
+                phase = RunPhase.WAITING_RETRY,
+                continuationCursor = currentCursor,
+                resumeCount = resumeCount,
+                lastProgressAtEpochMs = lastProgressAt,
+                pausedForContinuation = true,
+            )
+        }
+
+        suspend fun runScheduledVerifyAudit(): RunExecutionResult? {
+            if (!shouldRunScheduledVerify) return null
+
+            val checksummedCount = backupRecordRepository.countChecksummed(planId)
+            if (checksummedCount <= 0) {
+                log(SEVERITY_INFO, "No checksum-backed files available for scheduled verification.")
+                updatePlanPendingScheduledVerify(false)
+                currentCursor = null
+                lastProgressAt = nowEpochMs()
+                persistSnapshot(
+                    phase = RunPhase.RUNNING,
+                    continuationCursorValue = currentCursor,
+                )
+                return null
+            }
+
+            val startAfterRecordId = parseVerifyContinuationCursor(currentCursor)
+            if (startAfterRecordId > 0L) {
+                log(SEVERITY_INFO, "Verify continuation restored", "afterRecordId=$startAfterRecordId")
+            } else {
+                log(SEVERITY_INFO, "Scheduled verify started", "records=$checksummedCount")
+            }
+
+            var lastProcessedRecordId = startAfterRecordId
+            var processedInChunk = 0
+            val chunkStartedAt = nowEpochMs()
+
+            while (true) {
+                finalizeCanceledIfRequested()?.let { return it }
+                if (shouldPauseChunk(
+                        executionMode = normalizedExecutionMode,
+                        chunkStartedAt = chunkStartedAt,
+                        processedInChunk = processedInChunk,
+                    )
+                ) {
+                    return pauseForContinuation(encodeVerifyContinuationCursor(lastProcessedRecordId))
+                }
+
+                val records = backupRecordRepository.checksummedPage(
+                    planId = planId,
+                    afterRecordId = lastProcessedRecordId,
+                    limit = VERIFY_PAGE_SIZE,
+                )
+                if (records.isEmpty()) break
+
+                for (record in records) {
+                    finalizeCanceledIfRequested()?.let { return it }
+                    if (shouldPauseChunk(
+                            executionMode = normalizedExecutionMode,
+                            chunkStartedAt = chunkStartedAt,
+                            processedInChunk = processedInChunk,
+                        )
+                    ) {
+                        return pauseForContinuation(encodeVerifyContinuationCursor(lastProcessedRecordId))
+                    }
+
+                    lastProcessedRecordId = record.recordId
+                    val expectedSizeBytes = record.verifiedSizeBytes
+                    val checksumValue = record.checksumValue
+                    val checksumAlgorithm = record.checksumAlgorithm
+                    if (expectedSizeBytes == null || checksumValue.isNullOrBlank() || checksumAlgorithm.isNullOrBlank()) {
+                        processedInChunk += 1
+                        currentCursor = encodeVerifyContinuationCursor(lastProcessedRecordId)
+                        lastProgressAt = nowEpochMs()
+                        persistSnapshot(
+                            phase = RunPhase.RUNNING,
+                            continuationCursorValue = currentCursor,
+                        )
+                        continue
+                    }
+
+                    val verifyResult = runCatching {
+                        smbClient.verifyRemoteFile(
+                            request = connection,
+                            remotePath = record.remotePath,
+                            expectedSizeBytes = expectedSizeBytes,
+                            expectedChecksumAlgorithm = checksumAlgorithm,
+                            expectedChecksumValue = checksumValue,
+                        )
+                    }
+
+                    if (verifyResult.isSuccess) {
+                        val verified = verifyResult.getOrThrow()
+                        val updateResult = runCatching {
+                            backupRecordRepository.update(
+                                record.copy(
+                                    verifiedSizeBytes = verified.remoteSizeBytes,
+                                    checksumAlgorithm = verified.checksumAlgorithm,
+                                    checksumValue = verified.checksumValue,
+                                    checksumVerifiedAtEpochMs = verified.verifiedAtEpochMs,
+                                ),
+                            )
+                        }
+                        if (updateResult.isFailure) {
+                            failedCount += 1
+                            val message = "Scheduled verify succeeded for ${record.mediaItemId}, but updating audit metadata failed."
+                            summaryError = summaryError ?: message
+                            log(SEVERITY_ERROR, message, updateResult.exceptionOrNull().toLogDetail())
+                        } else {
+                            log(
+                                SEVERITY_INFO,
+                                "Verified backup record",
+                                "mediaId=${record.mediaItemId} dest=${maskRemotePath(record.remotePath)}",
+                            )
+                        }
+                    } else {
+                        val throwable = verifyResult.exceptionOrNull()
+                        val mapped = throwable?.toSmbConnectionFailure()
+                        val detail = throwable.toLogDetail()
+                        val connectionLevelFailure = mapped.isConnectionLevelAuditFailure()
+                        val message = mapped?.toAuditUserMessage(record.mediaItemId)
+                            ?: "Scheduled verify failed for item ${record.mediaItemId}."
+                        summaryError = summaryError ?: message
+                        failedCount += 1
+                        log(SEVERITY_ERROR, message, detail)
+                        if (connectionLevelFailure) {
+                            metric("run_interrupted", "reason=scheduled_verify_connection_failure")
+                            return finalizeRun(
+                                runId = runIdValue,
+                                planId = planId,
+                                startedAt = startedAt,
+                                scanned = scannedCount,
+                                uploaded = uploadedCount,
+                                skipped = skippedCount,
+                                failed = failedCount,
+                                summaryError = summaryError,
+                                status = if (uploadedCount > 0 || skippedCount > 0) {
+                                    RunStatus.PARTIAL
+                                } else {
+                                    RunStatus.FAILED
+                                },
+                                triggerSource = normalizedTriggerSource,
+                                executionMode = normalizedExecutionMode,
+                                resumeCount = resumeCount,
+                                lastProgressAt = maxOf(lastProgressAt, nowEpochMs()),
+                                log = ::log,
+                                progressCallback = progressListener,
+                            )
+                        }
+                    }
+
+                    processedInChunk += 1
+                    currentCursor = encodeVerifyContinuationCursor(lastProcessedRecordId)
+                    lastProgressAt = nowEpochMs()
+                    persistSnapshot(
+                        phase = RunPhase.RUNNING,
+                        continuationCursorValue = currentCursor,
+                    )
+                }
+            }
+
+            updatePlanPendingScheduledVerify(false)
+            completedScheduledVerifyAudit = true
+            currentCursor = null
+            lastProgressAt = nowEpochMs()
+            log(SEVERITY_INFO, "Scheduled verify completed", "records=$checksummedCount")
+            persistSnapshot(
+                phase = RunPhase.RUNNING,
+                continuationCursorValue = currentCursor,
+            )
+            return null
+        }
 
         log(
             SEVERITY_INFO,
             "Resolved destination",
             "host=${server.host} share=${server.shareName} basePath=${server.basePath} sourceType=$sourceType",
         )
+        log(
+            SEVERITY_INFO,
+            "Checksum configuration",
+            "verifyUploads=$shouldVerifyUploads pendingScheduledVerify=${plan.pendingScheduledVerify}",
+        )
         if (sourceType == SOURCE_TYPE_ALBUM && plan.useAlbumTemplating) {
             log(SEVERITY_INFO, "Template configuration", "dir=${plan.directoryTemplate} file=${plan.filenamePattern}")
         }
+
+        runScheduledVerifyAudit()?.let { return@withContext it }
 
         val albumDisplayName = runCatching {
             mediaStoreDataSource.listAlbums().firstOrNull { it.bucketId == plan.sourceAlbum }?.displayName
@@ -587,7 +791,7 @@ class RunPlanBackupUseCase(
         emitProgress(force = true)
         finalizeCanceledIfRequested()?.let { return@withContext it }
 
-        val startIndex = parseContinuationCursor(currentCursor, orderedItems.size)
+        val startIndex = parseUploadContinuationCursor(currentCursor, orderedItems.size)
         if (startIndex > 0) {
             log(
                 SEVERITY_INFO,
@@ -609,30 +813,12 @@ class RunPlanBackupUseCase(
                     processedInChunk = processedInChunk,
                 )
             ) {
-                currentCursor = index.toString()
-                persistSnapshot(
-                    phase = RunPhase.WAITING_RETRY,
-                    continuationCursorValue = currentCursor,
-                )
                 log(
                     SEVERITY_INFO,
                     "Chunk paused for system window",
-                    "cursor=$currentCursor resumeCount=$resumeCount processedInChunk=$processedInChunk",
+                    "cursor=${encodeUploadContinuationCursor(index)} resumeCount=$resumeCount processedInChunk=$processedInChunk",
                 )
-                metric("chunk_paused", "cursor=$currentCursor")
-                return@withContext RunExecutionResult(
-                    runId = runIdValue,
-                    status = RunStatus.RUNNING,
-                    uploadedCount = uploadedCount,
-                    skippedCount = skippedCount,
-                    failedCount = failedCount,
-                    summaryError = summaryError,
-                    phase = RunPhase.WAITING_RETRY,
-                    continuationCursor = currentCursor,
-                    resumeCount = resumeCount,
-                    lastProgressAtEpochMs = lastProgressAt,
-                    pausedForContinuation = true,
-                )
+                return@withContext pauseForContinuation(encodeUploadContinuationCursor(index))
             }
 
             val item = orderedItems[index]
@@ -642,7 +828,7 @@ class RunPlanBackupUseCase(
                 log(SEVERITY_INFO, "Skipped item", "mediaId=${item.mediaId} reason=already_backed_up")
                 index += 1
                 processedInChunk += 1
-                currentCursor = if (index < orderedItems.size) index.toString() else null
+                currentCursor = if (index < orderedItems.size) encodeUploadContinuationCursor(index) else null
                 lastProgressAt = nowEpochMs()
                 persistSnapshot(
                     phase = RunPhase.RUNNING,
@@ -707,11 +893,13 @@ class RunPlanBackupUseCase(
                         remotePath = remotePath,
                         contentLengthBytes = item.sizeBytes,
                         inputStream = input,
+                        verifyChecksum = shouldVerifyUploads,
                     )
                 }
             }
 
             if (uploadResult.isSuccess) {
+                val uploadDetails = uploadResult.getOrThrow()
                 val recordResult = runCatching {
                     backupRecordRepository.create(
                         BackupRecordEntity(
@@ -719,6 +907,10 @@ class RunPlanBackupUseCase(
                             mediaItemId = item.mediaId,
                             remotePath = remotePath,
                             uploadedAtEpochMs = nowEpochMs(),
+                            verifiedSizeBytes = uploadDetails.remoteSizeBytes.takeIf { it >= 0L },
+                            checksumAlgorithm = uploadDetails.checksumAlgorithm,
+                            checksumValue = uploadDetails.checksumValue,
+                            checksumVerifiedAtEpochMs = uploadDetails.checksumVerifiedAtEpochMs,
                         ),
                     )
                 }
@@ -742,7 +934,7 @@ class RunPlanBackupUseCase(
             }
             index += 1
             processedInChunk += 1
-            currentCursor = if (index < orderedItems.size) index.toString() else null
+            currentCursor = if (index < orderedItems.size) encodeUploadContinuationCursor(index) else null
             lastProgressAt = nowEpochMs()
             persistSnapshot(
                 phase = RunPhase.RUNNING,
@@ -759,8 +951,8 @@ class RunPlanBackupUseCase(
         )
 
         val finalStatus = when {
-            failedCount > 0 && uploadedCount == 0 && skippedCount == 0 -> RunStatus.FAILED
-            failedCount > 0 -> RunStatus.PARTIAL
+            failedCount > 0 && (uploadedCount > 0 || skippedCount > 0 || completedScheduledVerifyAudit) -> RunStatus.PARTIAL
+            failedCount > 0 -> RunStatus.FAILED
             else -> RunStatus.SUCCESS
         }
 
@@ -945,13 +1137,34 @@ class RunPlanBackupUseCase(
         }
     }
 
-    private fun parseContinuationCursor(
+    private fun parseUploadContinuationCursor(
         cursor: String?,
         maxExclusive: Int,
     ): Int {
-        val parsed = cursor?.trim()?.toIntOrNull() ?: 0
+        val trimmed = cursor?.trim().orEmpty()
+        val parsed = when {
+            trimmed.startsWith(UPLOAD_CURSOR_PREFIX) -> trimmed.removePrefix(UPLOAD_CURSOR_PREFIX).toIntOrNull() ?: 0
+            trimmed.startsWith(VERIFY_CURSOR_PREFIX) -> 0
+            else -> trimmed.toIntOrNull() ?: 0
+        }
         return parsed.coerceIn(0, maxExclusive)
     }
+
+    private fun parseVerifyContinuationCursor(cursor: String?): Long {
+        val trimmed = cursor?.trim().orEmpty()
+        return if (trimmed.startsWith(VERIFY_CURSOR_PREFIX)) {
+            trimmed.removePrefix(VERIFY_CURSOR_PREFIX).toLongOrNull() ?: 0L
+        } else {
+            0L
+        }
+    }
+
+    private fun encodeUploadContinuationCursor(index: Int): String = "$UPLOAD_CURSOR_PREFIX$index"
+
+    private fun encodeVerifyContinuationCursor(lastRecordId: Long): String = "$VERIFY_CURSOR_PREFIX$lastRecordId"
+
+    private fun isVerifyContinuationCursor(cursor: String?): Boolean =
+        cursor?.trim()?.startsWith(VERIFY_CURSOR_PREFIX) == true
 
     private suspend fun readPersistedStatus(runId: Long): String? =
         runRepository.getRun(runId)?.status?.trim()?.uppercase(Locale.US)
@@ -1031,6 +1244,9 @@ class RunPlanBackupUseCase(
         private const val MAX_ITEMS_PER_CHUNK_BACKGROUND = 80
         private const val SCAN_PROGRESS_PERSIST_INTERVAL_MS = 1_000L
         private const val SCAN_CANCEL_CHECK_INTERVAL_MS = 750L
+        private const val VERIFY_PAGE_SIZE = 25
+        private const val UPLOAD_CURSOR_PREFIX = "upload:"
+        private const val VERIFY_CURSOR_PREFIX = "verify:"
         private val ACTIVE_RUN_STATUSES = setOf(
             RunStatus.RUNNING,
             RunStatus.CANCEL_REQUESTED,
@@ -1249,4 +1465,25 @@ private fun skezza.nasbox.data.smb.SmbConnectionFailure.toUserMessage(): String 
     is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout -> "Connection timed out while uploading."
     is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption -> "Network interrupted during upload."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Upload failed due to an unknown connection issue."
+}
+
+private fun skezza.nasbox.data.smb.SmbConnectionFailure.toAuditUserMessage(mediaItemId: String): String = when (this) {
+    is skezza.nasbox.data.smb.SmbConnectionFailure.HostUnreachable -> "Server is unreachable during scheduled verify."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.AuthenticationFailed -> "Authentication failed during scheduled verify."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.ShareNotFound -> "SMB share not found during scheduled verify."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.RemotePermissionDenied ->
+        "Remote permissions denied verification access for item $mediaItemId."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout -> "Connection timed out during scheduled verify."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption -> "Network interrupted during scheduled verify."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Scheduled verify failed for item $mediaItemId."
+}
+
+private fun skezza.nasbox.data.smb.SmbConnectionFailure?.isConnectionLevelAuditFailure(): Boolean = when (this) {
+    is skezza.nasbox.data.smb.SmbConnectionFailure.HostUnreachable,
+    is skezza.nasbox.data.smb.SmbConnectionFailure.AuthenticationFailed,
+    is skezza.nasbox.data.smb.SmbConnectionFailure.ShareNotFound,
+    is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout,
+    is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption,
+    -> true
+    else -> false
 }
