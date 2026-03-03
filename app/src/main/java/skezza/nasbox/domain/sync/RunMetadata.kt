@@ -22,6 +22,7 @@ object RunExecutionMode {
 
 object RunPhase {
     const val RUNNING = "RUNNING"
+    const val VERIFYING = "VERIFYING"
     const val WAITING_RETRY = "WAITING_RETRY"
     const val FINISHING = "FINISHING"
     const val TERMINAL = "TERMINAL"

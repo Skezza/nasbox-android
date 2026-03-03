@@ -316,6 +316,36 @@ class SmbjClient : SmbClient {
         }
     }
 
+    override suspend fun readRemoteChecksum(
+        request: SmbConnectionRequest,
+        remotePath: String,
+        checksumAlgorithm: String,
+    ): RemoteVerifyResult {
+        return withContext(Dispatchers.IO) {
+            Log.i(
+                LOG_TAG,
+                "readRemoteChecksum start host=${request.host} share=${request.shareName} path=$remotePath",
+            )
+            runCatching {
+                withDiskShare(request) { diskShare ->
+                    val normalizedPath = remotePath.replace("/", "\\").trim('\\')
+                    readRemotePathChecksum(
+                        diskShare = diskShare,
+                        smbPath = normalizedPath,
+                        checksumAlgorithm = checksumAlgorithm,
+                        remotePath = remotePath,
+                    )
+                }
+            }.onFailure {
+                Log.e(
+                    LOG_TAG,
+                    "readRemoteChecksum failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}",
+                )
+                throw it
+            }.getOrThrow()
+        }
+    }
+
     private fun <T> withDiskShare(
         request: SmbConnectionRequest,
         block: (DiskShare) -> T,
@@ -376,6 +406,40 @@ class SmbjClient : SmbClient {
             remoteSizeBytes = expectedSizeBytes,
             checksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
             checksumValue = remoteChecksum,
+            verifiedAtEpochMs = verifiedAtEpochMs,
+        )
+    }
+
+    private fun readRemotePathChecksum(
+        diskShare: DiskShare,
+        smbPath: String,
+        checksumAlgorithm: String,
+        remotePath: String,
+    ): RemoteVerifyResult {
+        val normalizedAlgorithm = checksumAlgorithm.trim().uppercase()
+        require(normalizedAlgorithm == CHECKSUM_ALGORITHM_MD5) {
+            "Unsupported checksum algorithm: $checksumAlgorithm"
+        }
+        val result = diskShare.openFile(
+            smbPath,
+            setOf(AccessMask.GENERIC_READ),
+            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+            setOf(SMB2ShareAccess.FILE_SHARE_READ),
+            SMB2CreateDisposition.FILE_OPEN,
+            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+        ).use { remoteFile ->
+            val remoteSizeBytes = remoteFile.getFileInformation(FileStandardInformation::class.java).endOfFile
+            val remoteChecksum = remoteFile.inputStream.use { input ->
+                md5(input)
+            }
+            remoteSizeBytes to remoteChecksum
+        }
+        val verifiedAtEpochMs = System.currentTimeMillis()
+        Log.i(LOG_TAG, "readRemoteChecksum success path=$remotePath bytes=${result.first}")
+        return RemoteVerifyResult(
+            remoteSizeBytes = result.first,
+            checksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
+            checksumValue = result.second,
             verifiedAtEpochMs = verifiedAtEpochMs,
         )
     }

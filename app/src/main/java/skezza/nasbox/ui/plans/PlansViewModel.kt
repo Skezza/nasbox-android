@@ -408,6 +408,49 @@ class PlansViewModel(
         }
     }
 
+    fun verifyPlanNow(planId: Long) {
+        viewModelScope.launch {
+            var previousPlan: PlanEntity? = null
+            var updatedForVerify = false
+            runCatching {
+                val plan = planRepository.getPlan(planId) ?: throw IllegalStateException("Plan not found")
+                if (!plan.enabled || !plan.scheduleEnabled || !plan.checksumVerificationEnabled) {
+                    return@runCatching PlanRunEnqueueResult.IGNORED_DISABLED
+                }
+                previousPlan = plan
+                if (!plan.pendingScheduledVerify) {
+                    planRepository.updatePlan(plan.copy(pendingScheduledVerify = true))
+                    updatedForVerify = true
+                }
+                enqueuePlanRunUseCase(planId, RunTriggerSource.SCHEDULED)
+            }.onSuccess { result ->
+                when (result) {
+                    PlanRunEnqueueResult.ENQUEUED -> {
+                        _message.value = "Verification run queued now."
+                    }
+
+                    PlanRunEnqueueResult.COALESCED,
+                    PlanRunEnqueueResult.IGNORED_ALREADY_ACTIVE,
+                    -> {
+                        _message.value = "Verification will run after the current job finishes."
+                    }
+
+                    PlanRunEnqueueResult.IGNORED_DISABLED -> {
+                        if (updatedForVerify && previousPlan != null) {
+                            planRepository.updatePlan(previousPlan!!)
+                        }
+                        _message.value = "Verification requires an enabled auto-run job."
+                    }
+                }
+            }.onFailure {
+                if (updatedForVerify && previousPlan != null) {
+                    runCatching { planRepository.updatePlan(previousPlan!!) }
+                }
+                _message.value = "Unable to start verification now."
+            }
+        }
+    }
+
     private suspend fun maybeApplyFirstPlanDefaults(albums: List<MediaAlbum>) {
         val state = _editorState.value
         if (state.editingPlanId != null || state.name.isNotBlank()) return

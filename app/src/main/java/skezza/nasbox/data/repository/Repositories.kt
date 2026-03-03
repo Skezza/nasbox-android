@@ -62,6 +62,8 @@ interface BackupRecordRepository {
     suspend fun update(record: BackupRecordEntity)
     suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity?
     suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity>
+    suspend fun pageForPlan(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
+    suspend fun countForPlan(planId: Long): Int
     suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
     suspend fun countChecksummed(planId: Long): Int
 }
@@ -89,6 +91,13 @@ class DefaultBackupRecordRepository(
                 backupRecordDao.getByPlanAndMediaItems(planId, mediaIdChunk)
             }
     }
+
+    override suspend fun pageForPlan(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> {
+        if (limit <= 0) return emptyList()
+        return backupRecordDao.getByPlanPage(planId, afterRecordId, limit)
+    }
+
+    override suspend fun countForPlan(planId: Long): Int = backupRecordDao.countByPlan(planId)
 
     override suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> {
         if (limit <= 0) return emptyList()

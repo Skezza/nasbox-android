@@ -81,14 +81,18 @@ class RunPlanBackupUseCase(
         val runIdValue = activeRun.runId
         val startedAt = activeRun.startedAtEpochMs
         var scannedCount = activeRun.scannedCount
-        var uploadedCount = activeRun.uploadedCount
-        var skippedCount = activeRun.skippedCount
+        val resumingVerifyPhase = activeRun.phase.trim().uppercase(Locale.US) == RunPhase.VERIFYING
+        var uploadedCount = if (resumingVerifyPhase) 0 else activeRun.uploadedCount
+        var skippedCount = if (resumingVerifyPhase) 0 else activeRun.skippedCount
         var failedCount = activeRun.failedCount
         var summaryError: String? = activeRun.summaryError
         var resumeCount = activeRun.resumeCount
         var lastProgressAt = activeRun.lastProgressAtEpochMs.takeIf { it > 0L } ?: activeRun.startedAtEpochMs
         var currentCursor = continuationCursor ?: activeRun.continuationCursor
+        var currentPhase = activeRun.phase.trim().uppercase(Locale.US).ifBlank { RunPhase.RUNNING }
         var cancellationLogged = false
+        var auditRecordCount: Int? = null
+        var auditVerifiedCount = if (resumingVerifyPhase) activeRun.uploadedCount.coerceAtLeast(0) else 0
 
         suspend fun log(severity: String, message: String, detail: String? = null) {
             val formatted = "[runId=$runIdValue planId=$planId] $message"
@@ -113,20 +117,37 @@ class RunPlanBackupUseCase(
             Log.i(LOG_TAG, "metric=$event runId=$runIdValue planId=$planId$suffix")
         }
 
+        fun displayCountsForPhase(phase: String): Triple<Int, Int, Int> {
+            return if (phase.uppercase(Locale.US) == RunPhase.VERIFYING) {
+                Triple(auditRecordCount ?: scannedCount, auditVerifiedCount, 0)
+            } else {
+                Triple(scannedCount, uploadedCount, skippedCount)
+            }
+        }
+
+        fun hasVisibleProgressForPhase(phase: String): Boolean {
+            return if (phase.uppercase(Locale.US) == RunPhase.VERIFYING) {
+                auditVerifiedCount > 0
+            } else {
+                uploadedCount > 0 || skippedCount > 0
+            }
+        }
+
         suspend fun emitProgressSnapshot(
             status: String,
             phase: String,
             continuationCursorValue: String?,
         ) {
+            val (displayScannedCount, displayUploadedCount, displaySkippedCount) = displayCountsForPhase(phase)
             progressListener?.invoke(
                 RunProgressSnapshot(
                     runId = runIdValue,
                     planId = planId,
                     status = status,
                     phase = phase,
-                    scannedCount = scannedCount,
-                    uploadedCount = uploadedCount,
-                    skippedCount = skippedCount,
+                    scannedCount = displayScannedCount,
+                    uploadedCount = displayUploadedCount,
+                    skippedCount = displaySkippedCount,
                     failedCount = failedCount,
                     continuationCursor = continuationCursorValue,
                     resumeCount = resumeCount,
@@ -148,6 +169,8 @@ class RunPlanBackupUseCase(
             } else {
                 RunStatus.RUNNING
             }
+            currentPhase = phase.uppercase(Locale.US)
+            val (displayScannedCount, displayUploadedCount, displaySkippedCount) = displayCountsForPhase(phase)
             runRepository.updateRun(
                 RunEntity(
                     runId = runIdValue,
@@ -156,9 +179,9 @@ class RunPlanBackupUseCase(
                     startedAtEpochMs = startedAt,
                     finishedAtEpochMs = null,
                     heartbeatAtEpochMs = heartbeatAt,
-                    scannedCount = scannedCount,
-                    uploadedCount = uploadedCount,
-                    skippedCount = skippedCount,
+                    scannedCount = displayScannedCount,
+                    uploadedCount = displayUploadedCount,
+                    skippedCount = displaySkippedCount,
                     failedCount = failedCount,
                     summaryError = summaryError,
                     triggerSource = normalizedTriggerSource,
@@ -188,11 +211,12 @@ class RunPlanBackupUseCase(
                     phase = RunPhase.TERMINAL,
                     continuationCursorValue = null,
                 )
+                val (_, displayUploadedCount, displaySkippedCount) = displayCountsForPhase(currentPhase)
                 return RunExecutionResult(
                     runId = runIdValue,
                     status = RunStatus.CANCELED,
-                    uploadedCount = uploadedCount,
-                    skippedCount = skippedCount,
+                    uploadedCount = displayUploadedCount,
+                    skippedCount = displaySkippedCount,
                     failedCount = failedCount,
                     summaryError = summaryError ?: DEFAULT_CANCELED_SUMMARY,
                     phase = RunPhase.TERMINAL,
@@ -208,13 +232,14 @@ class RunPlanBackupUseCase(
                 cancellationLogged = true
                 log(SEVERITY_INFO, "Run cancellation acknowledged")
             }
+            val (displayScannedCount, displayUploadedCount, displaySkippedCount) = displayCountsForPhase(currentPhase)
             return finalizeRun(
                 runId = runIdValue,
                 planId = planId,
                 startedAt = startedAt,
-                scanned = scannedCount,
-                uploaded = uploadedCount,
-                skipped = skippedCount,
+                scanned = displayScannedCount,
+                uploaded = displayUploadedCount,
+                skipped = displaySkippedCount,
                 failed = failedCount,
                 summaryError = summaryError ?: DEFAULT_CANCELED_SUMMARY,
                 status = RunStatus.CANCELED,
@@ -428,9 +453,10 @@ class RunPlanBackupUseCase(
         suspend fun runScheduledVerifyAudit(): RunExecutionResult? {
             if (!shouldRunScheduledVerify) return null
 
-            val checksummedCount = backupRecordRepository.countChecksummed(planId)
-            if (checksummedCount <= 0) {
-                log(SEVERITY_INFO, "No checksum-backed files available for scheduled verification.")
+            val recordCount = backupRecordRepository.countForPlan(planId)
+            auditRecordCount = recordCount
+            if (recordCount <= 0) {
+                log(SEVERITY_INFO, "No backup records available for scheduled verification.")
                 updatePlanPendingScheduledVerify(false)
                 currentCursor = null
                 lastProgressAt = nowEpochMs()
@@ -440,12 +466,13 @@ class RunPlanBackupUseCase(
                 )
                 return null
             }
+            currentPhase = RunPhase.VERIFYING
 
             val startAfterRecordId = parseVerifyContinuationCursor(currentCursor)
             if (startAfterRecordId > 0L) {
                 log(SEVERITY_INFO, "Verify continuation restored", "afterRecordId=$startAfterRecordId")
             } else {
-                log(SEVERITY_INFO, "Scheduled verify started", "records=$checksummedCount")
+                log(SEVERITY_INFO, "Scheduled verify started", "records=$recordCount")
             }
 
             var lastProcessedRecordId = startAfterRecordId
@@ -463,7 +490,7 @@ class RunPlanBackupUseCase(
                     return pauseForContinuation(encodeVerifyContinuationCursor(lastProcessedRecordId))
                 }
 
-                val records = backupRecordRepository.checksummedPage(
+                val records = backupRecordRepository.pageForPlan(
                     planId = planId,
                     afterRecordId = lastProcessedRecordId,
                     limit = VERIFY_PAGE_SIZE,
@@ -485,29 +512,34 @@ class RunPlanBackupUseCase(
                     val expectedSizeBytes = record.verifiedSizeBytes
                     val checksumValue = record.checksumValue
                     val checksumAlgorithm = record.checksumAlgorithm
-                    if (expectedSizeBytes == null || checksumValue.isNullOrBlank() || checksumAlgorithm.isNullOrBlank()) {
-                        processedInChunk += 1
-                        currentCursor = encodeVerifyContinuationCursor(lastProcessedRecordId)
-                        lastProgressAt = nowEpochMs()
-                        persistSnapshot(
-                            phase = RunPhase.RUNNING,
-                            continuationCursorValue = currentCursor,
-                        )
-                        continue
-                    }
 
                     val verifyResult = runCatching {
-                        smbClient.verifyRemoteFile(
-                            request = connection,
-                            remotePath = record.remotePath,
-                            expectedSizeBytes = expectedSizeBytes,
-                            expectedChecksumAlgorithm = checksumAlgorithm,
-                            expectedChecksumValue = checksumValue,
-                        )
+                        if (
+                            expectedSizeBytes != null &&
+                            !checksumValue.isNullOrBlank() &&
+                            !checksumAlgorithm.isNullOrBlank()
+                        ) {
+                            smbClient.verifyRemoteFile(
+                                request = connection,
+                                remotePath = record.remotePath,
+                                expectedSizeBytes = expectedSizeBytes,
+                                expectedChecksumAlgorithm = checksumAlgorithm,
+                                expectedChecksumValue = checksumValue,
+                            )
+                        } else {
+                            smbClient.readRemoteChecksum(
+                                request = connection,
+                                remotePath = record.remotePath,
+                                checksumAlgorithm = DEFAULT_CHECKSUM_ALGORITHM,
+                            )
+                        }
                     }
 
                     if (verifyResult.isSuccess) {
                         val verified = verifyResult.getOrThrow()
+                        val initializedChecksum = expectedSizeBytes == null ||
+                            checksumValue.isNullOrBlank() ||
+                            checksumAlgorithm.isNullOrBlank()
                         val updateResult = runCatching {
                             backupRecordRepository.update(
                                 record.copy(
@@ -526,9 +558,10 @@ class RunPlanBackupUseCase(
                         } else {
                             log(
                                 SEVERITY_INFO,
-                                "Verified backup record",
+                                if (initializedChecksum) "Initialized backup record checksum" else "Verified backup record",
                                 "mediaId=${record.mediaItemId} dest=${maskRemotePath(record.remotePath)}",
                             )
+                            auditVerifiedCount += 1
                         }
                     } else {
                         val throwable = verifyResult.exceptionOrNull()
@@ -542,16 +575,18 @@ class RunPlanBackupUseCase(
                         log(SEVERITY_ERROR, message, detail)
                         if (connectionLevelFailure) {
                             metric("run_interrupted", "reason=scheduled_verify_connection_failure")
+                            val (displayScannedCount, displayUploadedCount, displaySkippedCount) =
+                                displayCountsForPhase(RunPhase.VERIFYING)
                             return finalizeRun(
                                 runId = runIdValue,
                                 planId = planId,
                                 startedAt = startedAt,
-                                scanned = scannedCount,
-                                uploaded = uploadedCount,
-                                skipped = skippedCount,
+                                scanned = displayScannedCount,
+                                uploaded = displayUploadedCount,
+                                skipped = displaySkippedCount,
                                 failed = failedCount,
                                 summaryError = summaryError,
-                                status = if (uploadedCount > 0 || skippedCount > 0) {
+                                status = if (hasVisibleProgressForPhase(RunPhase.VERIFYING)) {
                                     RunStatus.PARTIAL
                                 } else {
                                     RunStatus.FAILED
@@ -570,7 +605,7 @@ class RunPlanBackupUseCase(
                     currentCursor = encodeVerifyContinuationCursor(lastProcessedRecordId)
                     lastProgressAt = nowEpochMs()
                     persistSnapshot(
-                        phase = RunPhase.RUNNING,
+                        phase = RunPhase.VERIFYING,
                         continuationCursorValue = currentCursor,
                     )
                 }
@@ -580,11 +615,14 @@ class RunPlanBackupUseCase(
             completedScheduledVerifyAudit = true
             currentCursor = null
             lastProgressAt = nowEpochMs()
-            log(SEVERITY_INFO, "Scheduled verify completed", "records=$checksummedCount")
+            log(SEVERITY_INFO, "Scheduled verify completed", "records=$recordCount")
             persistSnapshot(
                 phase = RunPhase.RUNNING,
                 continuationCursorValue = currentCursor,
             )
+            auditRecordCount = null
+            auditVerifiedCount = 0
+            currentPhase = RunPhase.RUNNING
             return null
         }
 
@@ -1245,6 +1283,7 @@ class RunPlanBackupUseCase(
         private const val SCAN_PROGRESS_PERSIST_INTERVAL_MS = 1_000L
         private const val SCAN_CANCEL_CHECK_INTERVAL_MS = 750L
         private const val VERIFY_PAGE_SIZE = 25
+        private const val DEFAULT_CHECKSUM_ALGORITHM = "MD5"
         private const val UPLOAD_CURSOR_PREFIX = "upload:"
         private const val VERIFY_CURSOR_PREFIX = "verify:"
         private val ACTIVE_RUN_STATUSES = setOf(

@@ -81,4 +81,12 @@ interface SmbClient {
     ): RemoteVerifyResult {
         throw UnsupportedOperationException("Remote verification is not implemented by this SMB client")
     }
+
+    suspend fun readRemoteChecksum(
+        request: SmbConnectionRequest,
+        remotePath: String,
+        checksumAlgorithm: String,
+    ): RemoteVerifyResult {
+        throw UnsupportedOperationException("Remote checksum read is not implemented by this SMB client")
+    }
 }

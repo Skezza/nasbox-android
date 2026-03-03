@@ -168,6 +168,7 @@ private fun StorySummaryCard(
                     uploadedCount = run.uploadedCount,
                     skippedCount = run.skippedCount,
                     failedCount = run.failedCount,
+                    phase = run.phase,
                 ),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -379,6 +380,7 @@ private fun runPhaseLabel(run: DashboardRunDetailSummary): String {
     val phase = run.phase.uppercase(Locale.US)
     val mode = run.executionMode.uppercase(Locale.US)
     return when (phase) {
+        RunPhase.VERIFYING -> "Verifying backups"
         RunPhase.WAITING_RETRY -> "Waiting for background window"
         RunPhase.FINISHING -> "Finishing"
         RunPhase.RUNNING -> if (mode == RunExecutionMode.BACKGROUND) {

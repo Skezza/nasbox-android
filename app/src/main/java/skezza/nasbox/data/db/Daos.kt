@@ -61,6 +61,20 @@ interface BackupRecordDao {
         """
         SELECT * FROM backup_records
         WHERE plan_id = :planId
+          AND record_id > :afterRecordId
+        ORDER BY record_id
+        LIMIT :limit
+        """,
+    )
+    suspend fun getByPlanPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
+
+    @Query("SELECT COUNT(*) FROM backup_records WHERE plan_id = :planId")
+    suspend fun countByPlan(planId: Long): Int
+
+    @Query(
+        """
+        SELECT * FROM backup_records
+        WHERE plan_id = :planId
           AND checksum_value IS NOT NULL
           AND checksum_algorithm = 'MD5'
           AND record_id > :afterRecordId

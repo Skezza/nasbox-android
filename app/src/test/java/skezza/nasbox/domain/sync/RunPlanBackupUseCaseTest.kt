@@ -154,7 +154,7 @@ class RunPlanBackupUseCaseTest {
     }
 
     @Test
-    fun invoke_scheduledVerify_updatesExistingChecksumsAndClearsPendingFlag() = runBlocking {
+    fun invoke_scheduledVerify_initializesMissingChecksumsAndClearsPendingFlag() = runBlocking {
         val planRepository = FakePlanRepository(
             PlanEntity(
                 planId = 13,
@@ -178,10 +178,6 @@ class RunPlanBackupUseCaseTest {
                     mediaItemId = "media-1",
                     remotePath = "photos/Camera/one.jpg",
                     uploadedAtEpochMs = 100L,
-                    verifiedSizeBytes = 4L,
-                    checksumAlgorithm = "MD5",
-                    checksumValue = "seed_checksum",
-                    checksumVerifiedAtEpochMs = 200L,
                 ),
             ),
         )
@@ -205,9 +201,13 @@ class RunPlanBackupUseCaseTest {
         )
 
         assertEquals(RunStatus.SUCCESS, result.status)
-        assertEquals(listOf("photos/Camera/one.jpg"), smbClient.verifiedRemotePaths)
+        assertEquals(listOf("photos/Camera/one.jpg"), smbClient.readChecksumPaths)
         assertEquals(false, planRepository.currentPlan.pendingScheduledVerify)
-        assertEquals(2_000L, backupRepo.updatedRecords.single().checksumVerifiedAtEpochMs)
+        val updated = backupRepo.updatedRecords.single()
+        assertEquals(4L, updated.verifiedSizeBytes)
+        assertEquals("MD5", updated.checksumAlgorithm)
+        assertEquals("seeded_remote_checksum", updated.checksumValue)
+        assertEquals(2_100L, updated.checksumVerifiedAtEpochMs)
     }
 
     @Test
@@ -789,6 +789,20 @@ class RunPlanBackupUseCaseTest {
             }
         }
 
+        override suspend fun pageForPlan(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> {
+            return recordsByMediaItemId.values
+                .asSequence()
+                .filter { it.planId == planId }
+                .filter { it.recordId > afterRecordId }
+                .sortedBy { it.recordId }
+                .take(limit)
+                .toList()
+        }
+
+        override suspend fun countForPlan(planId: Long): Int {
+            return recordsByMediaItemId.values.count { it.planId == planId }
+        }
+
         override suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> {
             return recordsByMediaItemId.values
                 .asSequence()
@@ -943,6 +957,7 @@ class RunPlanBackupUseCaseTest {
         val uploadedPaths = mutableListOf<String>()
         val uploadVerifyFlags = mutableListOf<Boolean>()
         val verifiedRemotePaths = mutableListOf<String>()
+        val readChecksumPaths = mutableListOf<String>()
 
         override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult =
             SmbConnectionResult(1)
@@ -988,6 +1003,20 @@ class RunPlanBackupUseCaseTest {
                 checksumAlgorithm = expectedChecksumAlgorithm,
                 checksumValue = expectedChecksumValue.lowercase(),
                 verifiedAtEpochMs = 2_000L,
+            )
+        }
+
+        override suspend fun readRemoteChecksum(
+            request: SmbConnectionRequest,
+            remotePath: String,
+            checksumAlgorithm: String,
+        ): RemoteVerifyResult {
+            readChecksumPaths += remotePath
+            return RemoteVerifyResult(
+                remoteSizeBytes = 4L,
+                checksumAlgorithm = checksumAlgorithm,
+                checksumValue = "seeded_remote_checksum",
+                verifiedAtEpochMs = 2_100L,
             )
         }
     }

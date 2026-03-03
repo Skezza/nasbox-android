@@ -55,6 +55,10 @@ class DefaultBackupRecordRepositoryTest {
             }
         }
 
+        override suspend fun getByPlanPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> = emptyList()
+
+        override suspend fun countByPlan(planId: Long): Int = 0
+
         override suspend fun getChecksummedByPlanPage(
             planId: Long,
             afterRecordId: Long,

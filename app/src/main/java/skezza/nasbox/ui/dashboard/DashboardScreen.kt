@@ -403,6 +403,7 @@ private fun CurrentRunsCard(
                                 uploadedCount = run.uploadedCount,
                                 skippedCount = run.skippedCount,
                                 failedCount = run.failedCount,
+                                phase = run.phase,
                                 includeScanned = false,
                             ),
                             style = MaterialTheme.typography.bodySmall,
@@ -548,6 +549,7 @@ private fun currentPhaseLabel(run: DashboardCurrentRun): String {
     val phase = run.phase.uppercase(Locale.US)
     val executionMode = run.executionMode.uppercase(Locale.US)
     return when (phase) {
+        RunPhase.VERIFYING -> "Verifying backups"
         RunPhase.WAITING_RETRY -> "Waiting for background window"
         RunPhase.FINISHING -> "Finishing"
         RunPhase.RUNNING -> {

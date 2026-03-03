@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -196,6 +197,7 @@ fun PlansScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(planListState.plans, key = { it.planId }) { plan ->
+                        var verifyMenuExpanded by remember(plan.planId, plan.pendingScheduledVerify) { mutableStateOf(false) }
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -285,10 +287,39 @@ fun PlansScreen(
                                         },
                                     )
                                     if (plan.enabled && plan.scheduleEnabled && plan.checksumVerificationEnabled) {
-                                        OutlinedButton(
-                                            onClick = { viewModel.togglePendingScheduledVerify(plan.planId) },
-                                        ) {
-                                            Text(if (plan.pendingScheduledVerify) "Verify Queued" else "Schedule Verify")
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { verifyMenuExpanded = true },
+                                            ) {
+                                                Text(if (plan.pendingScheduledVerify) "Verify Options" else "Verify")
+                                            }
+                                            DropdownMenu(
+                                                expanded = verifyMenuExpanded,
+                                                onDismissRequest = { verifyMenuExpanded = false },
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            if (plan.pendingScheduledVerify) {
+                                                                "Cancel Scheduled Verify"
+                                                            } else {
+                                                                "Schedule Verify"
+                                                            },
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        verifyMenuExpanded = false
+                                                        viewModel.togglePendingScheduledVerify(plan.planId)
+                                                    },
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Verify Now") },
+                                                    onClick = {
+                                                        verifyMenuExpanded = false
+                                                        viewModel.verifyPlanNow(plan.planId)
+                                                    },
+                                                )
+                                            }
                                         }
                                     }
                                 }

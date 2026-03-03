@@ -346,6 +346,11 @@ class DashboardRunDetailViewModelTest {
         override suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity> =
             emptyList()
 
+        override suspend fun pageForPlan(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> =
+            emptyList()
+
+        override suspend fun countForPlan(planId: Long): Int = 0
+
         override suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> =
             emptyList()
 
