@@ -291,7 +291,7 @@ fun PlansScreen(
                                             OutlinedButton(
                                                 onClick = { verifyMenuExpanded = true },
                                             ) {
-                                                Text(if (plan.pendingScheduledVerify) "Verify Options" else "Verify")
+                                                Text("Verify")
                                             }
                                             DropdownMenu(
                                                 expanded = verifyMenuExpanded,
@@ -324,7 +324,7 @@ fun PlansScreen(
                                     }
                                 }
                                 if (plan.pendingScheduledVerify) {
-                                    Text("Next auto-run will audit stored checksums.")
+                                    Text("Next auto-run will verify and save checksums.")
                                 }
                             }
                         }

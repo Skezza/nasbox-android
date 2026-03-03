@@ -117,7 +117,7 @@ fun AuditScreen(
                                 }
                                 Text(
                                     if (run.phase.equals(RunPhase.VERIFYING, ignoreCase = true)) {
-                                        "Verified ${run.uploadedCount} · Failed ${run.failedCount}"
+                                        "Verifying ${run.uploadedCount} · Failed ${run.failedCount}"
                                     } else {
                                         "Uploaded ${run.uploadedCount} · Skipped ${run.skippedCount} · Failed ${run.failedCount}"
                                     },

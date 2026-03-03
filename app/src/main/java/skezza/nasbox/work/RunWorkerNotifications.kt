@@ -110,14 +110,19 @@ internal object RunWorkerNotifications {
         )
         val resolvedJobName = planName?.trim()?.takeIf { it.isNotBlank() } ?: "Job #${snapshot.planId}"
         val contentText = if (snapshot.phase.equals(RunPhase.VERIFYING, ignoreCase = true)) {
-            "Verified ${snapshot.uploadedCount}/${snapshot.scannedCount.coerceAtLeast(0)}, Failed ${snapshot.failedCount}"
+            "Verifying ${(snapshot.uploadedCount + snapshot.failedCount).coerceAtMost(snapshot.scannedCount.coerceAtLeast(0))}/${snapshot.scannedCount.coerceAtLeast(0)}, Failed ${snapshot.failedCount}"
         } else {
             "Uploaded ${snapshot.uploadedCount}, Skipped ${snapshot.skippedCount}, Failed ${snapshot.failedCount}"
+        }
+        val contentTitle = if (snapshot.phase.equals(RunPhase.VERIFYING, ignoreCase = true)) {
+            "$resolvedJobName verification in progress"
+        } else {
+            "$resolvedJobName backup in progress"
         }
 
         val builder = NotificationCompat.Builder(context, RUNNING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_nasbox)
-            .setContentTitle("$resolvedJobName backup in progress")
+            .setContentTitle(contentTitle)
             .setContentText(contentText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setOngoing(true)

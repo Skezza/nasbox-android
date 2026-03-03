@@ -14,11 +14,7 @@ internal fun runCountSummaryText(
     if (phase?.uppercase(Locale.US) == RunPhase.VERIFYING) {
         val total = scannedCount.coerceAtLeast(0)
         val processed = (uploadedCount + failedCount).coerceAtMost(total)
-        return if (includeScanned) {
-            "Verifying $processed/$total · Failed $failedCount"
-        } else {
-            "Verified $uploadedCount · Failed $failedCount"
-        }
+        return "Verifying $processed/$total · Failed $failedCount"
     }
     val processedSummary = "Uploaded $uploadedCount · Skipped $skippedCount · Failed $failedCount"
     return if (includeScanned) {

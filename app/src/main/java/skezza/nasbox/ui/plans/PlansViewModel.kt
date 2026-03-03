@@ -398,9 +398,9 @@ class PlansViewModel(
             }.onSuccess { nextValue ->
                 nextValue ?: return@onSuccess
                 _message.value = if (nextValue) {
-                    "Next auto-run will verify existing checksummed backups."
+                    "Next auto-run will verify and save checksums."
                 } else {
-                    "Scheduled verification canceled."
+                    "Scheduled verify canceled."
                 }
             }.onFailure {
                 _message.value = "Unable to update scheduled verification."
@@ -426,13 +426,13 @@ class PlansViewModel(
             }.onSuccess { result ->
                 when (result) {
                     PlanRunEnqueueResult.ENQUEUED -> {
-                        _message.value = "Verification run queued now."
+                        _message.value = "Verification started."
                     }
 
                     PlanRunEnqueueResult.COALESCED,
                     PlanRunEnqueueResult.IGNORED_ALREADY_ACTIVE,
                     -> {
-                        _message.value = "Verification will run after the current job finishes."
+                        _message.value = "Verification queued after the current run."
                     }
 
                     PlanRunEnqueueResult.IGNORED_DISABLED -> {
