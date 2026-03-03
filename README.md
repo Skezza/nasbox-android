@@ -21,6 +21,9 @@ The app is built with Kotlin, Jetpack Compose, Room, WorkManager, and SMBJ. It s
 - Runs manual backups with persisted run history and per-run counters
 - Deduplicates uploads using persisted backup records
 - Shows active and recent runs from the dashboard, including stop/cancel controls
+- Supports per-job checksum verification for new uploads, including temp-file writes and remote read-back validation
+- Lets you trigger verification from the Jobs screen, either immediately or on the next scheduled run
+- Builds and re-checks stored checksum baselines for existing backup records, with live verification progress in the dashboard and notifications
 
 ## Developer setup
 
