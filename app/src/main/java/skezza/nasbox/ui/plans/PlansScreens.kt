@@ -535,8 +535,8 @@ fun PlanEditorScreen(
                     onCheckedChange = viewModel::updateEditorChecksumVerificationEnabled,
                 )
             }
-            Text("Reads each new upload back from the NAS to compare MD5 before accepting it. Slower, but safer.")
-            Text("This verifies only newly uploaded files. Use Schedule Verify on the Jobs page to re-check previously verified backups on the next auto-run.")
+            Text("Validates each new upload with an MD5 read-back (performance penalty).")
+            Text("Only new files. Use 'Verify' button on Jobs view to validate existing backups.")
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Auto-run")

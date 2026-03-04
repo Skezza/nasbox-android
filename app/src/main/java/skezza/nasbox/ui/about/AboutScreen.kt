@@ -120,9 +120,9 @@ fun AboutScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Archive transfer", style = MaterialTheme.typography.titleMedium)
+                        Text("Transfer profile", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Move your backup catalog to another phone with a JSON export. Passwords are not included.",
+                            "Move your backup catalog to another device with a JSON export. Passwords are not included.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         TextButton(
@@ -131,7 +131,7 @@ fun AboutScreen(
                                 exportLauncher.launch(viewModel.suggestedExportFileName())
                             },
                         ) {
-                            Text("Export Backup Sets")
+                            Text("Export Profile")
                         }
                         TextButton(
                             enabled = !uiState.isWorking,
@@ -139,7 +139,7 @@ fun AboutScreen(
                                 importLauncher.launch(arrayOf("application/json", "text/plain"))
                             },
                         ) {
-                            Text("Import Backup Sets")
+                            Text("Import Porfile")
                         }
                     }
                 }
