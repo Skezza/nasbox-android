@@ -536,7 +536,7 @@ fun PlanEditorScreen(
                 )
             }
             Text("Validates each new upload with an MD5 read-back (performance penalty).")
-            Text("Only new files. Use 'Verify' button on Jobs view to validate existing backups.")
+            Text("Use 'Verify' on Jobs view to validate existing backups.")
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Auto-run")

@@ -14,11 +14,16 @@ The app is built with Kotlin, Jetpack Compose, Room, WorkManager, and SMBJ. It s
 
 ### App screenshots
 
-<img width="1220" height="2712" alt="about_transfer" src="https://github.com/user-attachments/assets/1c4ad46e-4068-4dd0-baf0-bfc4df732ffe" />
-<img width="1220" height="2712" alt="servers" src="https://github.com/user-attachments/assets/48509751-45d1-4494-929c-a8b772aa94b1" />
-<img width="1220" height="2712" alt="jobs" src="https://github.com/user-attachments/assets/a25d4a8e-e88c-48d9-afa2-81df4ce07abd" />
-<img width="1220" height="2712" alt="job_editor" src="https://github.com/user-attachments/assets/769ccd75-ccb0-4744-bd49-35e0cada51b9" />
-<img width="1220" height="2712" alt="dashboard" src="https://github.com/user-attachments/assets/f4e54648-973b-474c-8dc4-b1e47ede6e8b" />
+<p align="center">
+  <img width="220" alt="about_transfer" src="https://github.com/user-attachments/assets/1c4ad46e-4068-4dd0-baf0-bfc4df732ffe" />
+  <img width="220" alt="servers" src="https://github.com/user-attachments/assets/48509751-45d1-4494-929c-a8b772aa94b1" />
+  <img width="220" alt="jobs" src="https://github.com/user-attachments/assets/a25d4a8e-e88c-48d9-afa2-81df4ce07abd" />
+</p>
+
+<p align="center">
+  <img width="220" alt="job_editor" src="https://github.com/user-attachments/assets/769ccd75-ccb0-4744-bd49-35e0cada51b9" />
+  <img width="220" alt="dashboard" src="https://github.com/user-attachments/assets/f4e54648-973b-474c-8dc4-b1e47ede6e8b" />
+</p>
 
 
 ## What it does
