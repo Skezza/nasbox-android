@@ -116,7 +116,11 @@ fun AuditScreen(
                                     )
                                 }
                                 Text(
-                                    "Uploaded ${run.uploadedCount} · Skipped ${run.skippedCount} · Failed ${run.failedCount}",
+                                    if (run.phase.equals(RunPhase.VERIFYING, ignoreCase = true)) {
+                                        "Verifying ${run.uploadedCount} · Failed ${run.failedCount}"
+                                    } else {
+                                        "Uploaded ${run.uploadedCount} · Skipped ${run.skippedCount} · Failed ${run.failedCount}"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 Text(
@@ -306,6 +310,7 @@ private fun statusLabel(
     val normalizedMode = executionMode.uppercase(Locale.US)
     if (status.uppercase(Locale.US) == RunStatus.RUNNING) {
         return when (normalizedPhase) {
+            RunPhase.VERIFYING -> "Verifying backups"
             RunPhase.WAITING_RETRY -> "Waiting for background window"
             RunPhase.FINISHING -> "Finishing"
             else -> if (normalizedMode == RunExecutionMode.BACKGROUND) {

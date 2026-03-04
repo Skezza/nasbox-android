@@ -81,6 +81,12 @@ data class PlanEntity(
     val scheduleIntervalHours: Int = 24,
     @ColumnInfo(name = "progress_notification_enabled")
     val progressNotificationEnabled: Boolean = true,
+    @ColumnInfo(name = "checksum_verification_enabled")
+    val checksumVerificationEnabled: Boolean = false,
+    @ColumnInfo(name = "pending_scheduled_verify")
+    val pendingScheduledVerify: Boolean = false,
+    @ColumnInfo(name = "imported_at_epoch_ms")
+    val importedAtEpochMs: Long? = null,
 )
 
 @Entity(
@@ -96,6 +102,7 @@ data class PlanEntity(
     ],
     indices = [
         Index(value = ["plan_id", "media_item_id"], unique = true),
+        Index(value = ["plan_id", "record_id"]),
     ],
 )
 data class BackupRecordEntity(
@@ -110,6 +117,14 @@ data class BackupRecordEntity(
     val remotePath: String,
     @ColumnInfo(name = "uploaded_at_epoch_ms")
     val uploadedAtEpochMs: Long,
+    @ColumnInfo(name = "verified_size_bytes")
+    val verifiedSizeBytes: Long? = null,
+    @ColumnInfo(name = "checksum_algorithm")
+    val checksumAlgorithm: String? = null,
+    @ColumnInfo(name = "checksum_value")
+    val checksumValue: String? = null,
+    @ColumnInfo(name = "checksum_verified_at_epoch_ms")
+    val checksumVerifiedAtEpochMs: Long? = null,
 )
 
 @Entity(

@@ -33,6 +33,9 @@ class PlansViewModelMappingTest {
             scheduleDaysMask = recurrenceMask,
             scheduleDayOfMonth = 17,
             scheduleIntervalHours = 12,
+            checksumVerificationEnabled = true,
+            pendingScheduledVerify = true,
+            importedAtEpochMs = 9876L,
         )
 
         val editorState = editorStateFromPlanEntity(plan)
@@ -49,6 +52,12 @@ class PlansViewModelMappingTest {
         assertEquals(12, mappedBack.scheduleIntervalHours)
         assertEquals(21 * 60, mappedBack.scheduleTimeMinutes)
         assertEquals(plan.progressNotificationEnabled, mappedBack.progressNotificationEnabled)
+        assertTrue(editorState.checksumVerificationEnabled)
+        assertTrue(editorState.pendingScheduledVerify)
+        assertEquals(9876L, editorState.importedAtEpochMs)
+        assertTrue(mappedBack.checksumVerificationEnabled)
+        assertTrue(mappedBack.pendingScheduledVerify)
+        assertEquals(9876L, mappedBack.importedAtEpochMs)
     }
 
     @Test
@@ -75,6 +84,41 @@ class PlansViewModelMappingTest {
         assertEquals(31, entity.scheduleDayOfMonth)
         assertEquals(168, entity.scheduleIntervalHours)
         assertTrue(entity.progressNotificationEnabled)
+    }
+
+    @Test
+    fun planEntityFromEditorState_clearsPendingVerifyWhenChecksumOrScheduleDisabled() {
+        val checksumDisabled = planEntityFromEditorState(
+            PlanEditorUiState(
+                name = "Example",
+                selectedAlbumId = "album",
+                selectedServerId = 100L,
+                checksumVerificationEnabled = false,
+                pendingScheduledVerify = true,
+                scheduleEnabled = true,
+            ),
+        )
+        val scheduleDisabled = planEntityFromEditorState(
+            PlanEditorUiState(
+                name = "Example",
+                selectedAlbumId = "album",
+                selectedServerId = 100L,
+                checksumVerificationEnabled = true,
+                pendingScheduledVerify = true,
+                scheduleEnabled = false,
+            ),
+        )
+
+        assertTrue(!checksumDisabled.pendingScheduledVerify)
+        assertTrue(!scheduleDisabled.pendingScheduledVerify)
+    }
+
+    @Test
+    fun newEditorState_defaultsChecksumVerificationOn() {
+        val editorState = PlanEditorUiState()
+
+        assertTrue(editorState.checksumVerificationEnabled)
+        assertTrue(!editorState.pendingScheduledVerify)
     }
 
     @Test

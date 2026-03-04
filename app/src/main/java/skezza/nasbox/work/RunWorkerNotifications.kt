@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.work.ForegroundInfo
 import skezza.nasbox.MainActivity
 import skezza.nasbox.R
+import skezza.nasbox.domain.sync.RunPhase
 import skezza.nasbox.domain.sync.RunProgressSnapshot
 
 internal object RunWorkerNotifications {
@@ -108,12 +109,20 @@ internal object RunWorkerNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val resolvedJobName = planName?.trim()?.takeIf { it.isNotBlank() } ?: "Job #${snapshot.planId}"
-        val contentText = "Uploaded ${snapshot.uploadedCount}, Skipped ${snapshot.skippedCount}, " +
-            "Failed ${snapshot.failedCount}"
+        val contentText = if (snapshot.phase.equals(RunPhase.VERIFYING, ignoreCase = true)) {
+            "Verifying ${(snapshot.uploadedCount + snapshot.failedCount).coerceAtMost(snapshot.scannedCount.coerceAtLeast(0))}/${snapshot.scannedCount.coerceAtLeast(0)}, Failed ${snapshot.failedCount}"
+        } else {
+            "Uploaded ${snapshot.uploadedCount}, Skipped ${snapshot.skippedCount}, Failed ${snapshot.failedCount}"
+        }
+        val contentTitle = if (snapshot.phase.equals(RunPhase.VERIFYING, ignoreCase = true)) {
+            "$resolvedJobName verification in progress"
+        } else {
+            "$resolvedJobName backup in progress"
+        }
 
         val builder = NotificationCompat.Builder(context, RUNNING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_nasbox)
-            .setContentTitle("$resolvedJobName backup in progress")
+            .setContentTitle(contentTitle)
             .setContentText(contentText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
             .setOngoing(true)

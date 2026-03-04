@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -196,6 +197,7 @@ fun PlansScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(planListState.plans, key = { it.planId }) { plan ->
+                        var verifyMenuExpanded by remember(plan.planId, plan.pendingScheduledVerify) { mutableStateOf(false) }
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -260,6 +262,69 @@ fun PlansScreen(
                                         Icon(Icons.Default.Delete, contentDescription = null)
                                         Text("Delete", modifier = Modifier.padding(start = 6.dp))
                                     }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    FilterChip(
+                                        selected = plan.checksumVerificationEnabled,
+                                        onClick = {
+                                            viewModel.togglePlanChecksumVerification(
+                                                planId = plan.planId,
+                                                enabled = !plan.checksumVerificationEnabled,
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                if (plan.checksumVerificationEnabled) {
+                                                    "Checksum: On"
+                                                } else {
+                                                    "Checksum: Off"
+                                                },
+                                            )
+                                        },
+                                    )
+                                    if (plan.enabled && plan.scheduleEnabled && plan.checksumVerificationEnabled) {
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { verifyMenuExpanded = true },
+                                            ) {
+                                                Text("Verify")
+                                            }
+                                            DropdownMenu(
+                                                expanded = verifyMenuExpanded,
+                                                onDismissRequest = { verifyMenuExpanded = false },
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            if (plan.pendingScheduledVerify) {
+                                                                "Cancel Scheduled Verify"
+                                                            } else {
+                                                                "Schedule Verify"
+                                                            },
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        verifyMenuExpanded = false
+                                                        viewModel.togglePendingScheduledVerify(plan.planId)
+                                                    },
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Verify Now") },
+                                                    onClick = {
+                                                        verifyMenuExpanded = false
+                                                        viewModel.verifyPlanNow(plan.planId)
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (plan.pendingScheduledVerify) {
+                                    Text("Next auto-run will verify and save checksums.")
                                 }
                             }
                         }
@@ -462,6 +527,16 @@ fun PlanEditorScreen(
                     onCheckedChange = viewModel::updateEditorProgressNotificationEnabled,
                 )
             }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Verify new uploads with checksum")
+                Switch(
+                    checked = editorState.checksumVerificationEnabled,
+                    onCheckedChange = viewModel::updateEditorChecksumVerificationEnabled,
+                )
+            }
+            Text("Validates each new upload with an MD5 read-back (performance penalty).")
+            Text("Use 'Verify' on Jobs view to validate existing backups.")
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Auto-run")

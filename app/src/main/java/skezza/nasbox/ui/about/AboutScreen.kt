@@ -1,5 +1,7 @@
 package skezza.nasbox.ui.about
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,10 +18,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -28,10 +36,14 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
+    viewModel: AboutViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
+    val message by viewModel.message.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
     val versionName = try {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
     } catch (_: Exception) {
@@ -39,9 +51,26 @@ fun AboutScreen(
     }
     val uriHandler = LocalUriHandler.current
     val repoUrl = "https://github.com/Skezza/nasbox-android"
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            viewModel.exportBackupSets(uri)
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            viewModel.importBackupSets(uri)
+        }
+    }
+
+    LaunchedEffect(message) {
+        val text = message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(text)
+        viewModel.clearMessage()
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("About") },
@@ -80,6 +109,38 @@ fun AboutScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Transfer profile", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Move your backup catalog to another device with a JSON export. Passwords are not included.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        TextButton(
+                            enabled = !uiState.isWorking,
+                            onClick = {
+                                exportLauncher.launch(viewModel.suggestedExportFileName())
+                            },
+                        ) {
+                            Text("Export Profile")
+                        }
+                        TextButton(
+                            enabled = !uiState.isWorking,
+                            onClick = {
+                                importLauncher.launch(arrayOf("application/json", "text/plain"))
+                            },
+                        ) {
+                            Text("Import Porfile")
+                        }
                     }
                 }
             }

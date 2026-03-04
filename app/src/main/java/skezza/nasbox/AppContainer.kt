@@ -29,6 +29,8 @@ import skezza.nasbox.data.smb.SmbjClient
 import skezza.nasbox.data.smb.SmbjRpcShareEnumerator
 import skezza.nasbox.domain.schedule.PlanScheduleCoordinator
 import skezza.nasbox.domain.discovery.DiscoverSmbServersUseCase
+import skezza.nasbox.domain.archive.ExportBackupSetsUseCase
+import skezza.nasbox.domain.archive.ImportBackupSetsUseCase
 import skezza.nasbox.domain.media.ListMediaAlbumsUseCase
 import skezza.nasbox.domain.smb.BrowseSmbDestinationUseCase
 import skezza.nasbox.domain.smb.TestSmbConnectionUseCase
@@ -81,6 +83,16 @@ class AppContainer(context: Context) {
         credentialStore = credentialStore,
         mediaStoreDataSource = mediaStoreDataSource,
         smbClient = smbClient,
+    )
+
+    val exportBackupSetsUseCase: ExportBackupSetsUseCase = ExportBackupSetsUseCase(
+        context = context,
+        database = database,
+    )
+
+    val importBackupSetsUseCase: ImportBackupSetsUseCase = ImportBackupSetsUseCase(
+        context = context,
+        database = database,
     )
 
     val enqueuePlanRunUseCase: EnqueuePlanRunUseCase = EnqueuePlanRunUseCase(

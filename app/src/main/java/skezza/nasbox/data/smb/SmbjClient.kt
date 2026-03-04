@@ -3,6 +3,7 @@ package skezza.nasbox.data.smb
 import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
+import com.hierynomus.msfscc.fileinformation.FileStandardInformation
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2CreateOptions
 import com.hierynomus.mssmb2.SMB2ShareAccess
@@ -10,9 +11,11 @@ import com.hierynomus.protocol.commons.buffer.Buffer
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.share.DiskShare
+import java.io.IOException
 import java.io.InputStream
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.MessageDigest
 import kotlin.system.measureTimeMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +29,7 @@ class SmbjClient : SmbClient {
     companion object {
         private const val LOG_TAG = "NasBoxSmb"
         private const val BROWSE_TAG = "NasBoxBrowse"
+        private const val CHECKSUM_ALGORITHM_MD5 = "MD5"
     }
 
     override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = withContext(Dispatchers.IO) {
@@ -188,46 +192,83 @@ class SmbjClient : SmbClient {
         remotePath: String,
         contentLengthBytes: Long?,
         inputStream: InputStream,
+        verifyChecksum: Boolean,
         onProgressBytes: (Long) -> Unit,
-    ): Unit {
-        withContext(Dispatchers.IO) {
+    ): UploadFileResult {
+        return withContext(Dispatchers.IO) {
             Log.i(
                 LOG_TAG,
-                "uploadFile start host=${request.host} share=${request.shareName} path=$remotePath size=${contentLengthBytes ?: -1}",
+                "uploadFile start host=${request.host} share=${request.shareName} path=$remotePath size=${contentLengthBytes ?: -1} verify=$verifyChecksum",
             )
 
             runCatching {
-                SMBClient().use { smbClient ->
-                    smbClient.connect(request.host).use { connection ->
-                        val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
-                        connection.authenticate(authContext).use { session ->
-                            val share = session.connectShare(request.shareName)
-                            (share as? DiskShare)?.use { diskShare ->
-                                val normalizedPath = remotePath.replace("\\", "/").trim('/')
-                                ensureDirectories(diskShare, normalizedPath)
-                                val file = diskShare.openFile(
-                                    normalizedPath.replace('/', '\\'),
-                                    setOf(AccessMask.GENERIC_WRITE),
-                                    setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
-                                    setOf(SMB2ShareAccess.FILE_SHARE_READ),
-                                    SMB2CreateDisposition.FILE_OVERWRITE_IF,
-                                    setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-                                )
-                                file.outputStream.use { output ->
-                                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                                    var totalWritten = 0L
-                                    while (true) {
-                                        val read = inputStream.read(buffer)
-                                        if (read <= 0) break
-                                        output.write(buffer, 0, read)
-                                        totalWritten += read
-                                        onProgressBytes(totalWritten)
-                                    }
-                                    output.flush()
-                                    Log.i(LOG_TAG, "uploadFile complete path=$remotePath bytes=$totalWritten")
+                withDiskShare(request) { diskShare ->
+                    val normalizedPath = remotePath.replace("\\", "/").trim('/')
+                    ensureDirectories(diskShare, normalizedPath)
+                    val finalSmbPath = normalizedPath.replace('/', '\\')
+                    val tempSmbPath = temporaryUploadPath(finalSmbPath)
+                    var renamedToFinalPath = false
+                    diskShare.openFile(
+                        tempSmbPath,
+                        setOf(AccessMask.GENERIC_WRITE),
+                        setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+                        setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                        SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                        setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+                    ).use { file ->
+                        try {
+                            val digest = if (verifyChecksum) MessageDigest.getInstance(CHECKSUM_ALGORITHM_MD5) else null
+                            var totalWritten = 0L
+                            file.outputStream.use { output ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                while (true) {
+                                    val read = inputStream.read(buffer)
+                                    if (read <= 0) break
+                                    output.write(buffer, 0, read)
+                                    totalWritten += read
+                                    digest?.update(buffer, 0, read)
+                                    onProgressBytes(totalWritten)
                                 }
-                            } ?: error("Connected share is not a disk share")
-                            share.close()
+                                output.flush()
+                                if (contentLengthBytes != null && totalWritten != contentLengthBytes) {
+                                    throw IOException(
+                                        "Upload truncated for $remotePath: wrote $totalWritten of $contentLengthBytes bytes.",
+                                    )
+                                }
+                                Log.i(LOG_TAG, "uploadFile staged path=$remotePath bytes=$totalWritten")
+                            }
+                            val verificationResult = if (verifyChecksum) {
+                                verifyRemotePath(
+                                    diskShare = diskShare,
+                                    smbPath = tempSmbPath,
+                                    expectedSizeBytes = totalWritten,
+                                    expectedChecksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
+                                    expectedChecksumValue = digest!!.digest().toHexString(),
+                                    remotePath = remotePath,
+                                )
+                            } else {
+                                null
+                            }
+                            file.rename(finalSmbPath, true)
+                            renamedToFinalPath = true
+                            Log.i(LOG_TAG, "uploadFile complete path=$remotePath")
+                            UploadFileResult(
+                                remoteSizeBytes = verificationResult?.remoteSizeBytes ?: totalWritten,
+                                checksumAlgorithm = verificationResult?.checksumAlgorithm,
+                                checksumValue = verificationResult?.checksumValue,
+                                checksumVerifiedAtEpochMs = verificationResult?.verifiedAtEpochMs,
+                            )
+                        } catch (throwable: Throwable) {
+                            if (!renamedToFinalPath) {
+                                runCatching { diskShare.rm(tempSmbPath) }
+                                    .onFailure {
+                                        Log.w(
+                                            LOG_TAG,
+                                            "uploadFile temp cleanup failed path=$tempSmbPath reason=${it.message}",
+                                        )
+                                    }
+                            }
+                            throw throwable
                         }
                     }
                 }
@@ -237,8 +278,170 @@ class SmbjClient : SmbClient {
                     "uploadFile failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}",
                 )
                 throw it
+            }.getOrThrow()
+        }
+    }
+
+    override suspend fun verifyRemoteFile(
+        request: SmbConnectionRequest,
+        remotePath: String,
+        expectedSizeBytes: Long,
+        expectedChecksumAlgorithm: String,
+        expectedChecksumValue: String,
+    ): RemoteVerifyResult {
+        return withContext(Dispatchers.IO) {
+            Log.i(
+                LOG_TAG,
+                "verifyRemoteFile start host=${request.host} share=${request.shareName} path=$remotePath size=$expectedSizeBytes",
+            )
+            runCatching {
+                withDiskShare(request) { diskShare ->
+                    val normalizedPath = remotePath.replace("/", "\\").trim('\\')
+                    verifyRemotePath(
+                        diskShare = diskShare,
+                        smbPath = normalizedPath,
+                        expectedSizeBytes = expectedSizeBytes,
+                        expectedChecksumAlgorithm = expectedChecksumAlgorithm,
+                        expectedChecksumValue = expectedChecksumValue,
+                        remotePath = remotePath,
+                    )
+                }
+            }.onFailure {
+                Log.e(
+                    LOG_TAG,
+                    "verifyRemoteFile failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}",
+                )
+                throw it
+            }.getOrThrow()
+        }
+    }
+
+    override suspend fun readRemoteChecksum(
+        request: SmbConnectionRequest,
+        remotePath: String,
+        checksumAlgorithm: String,
+    ): RemoteVerifyResult {
+        return withContext(Dispatchers.IO) {
+            Log.i(
+                LOG_TAG,
+                "readRemoteChecksum start host=${request.host} share=${request.shareName} path=$remotePath",
+            )
+            runCatching {
+                withDiskShare(request) { diskShare ->
+                    val normalizedPath = remotePath.replace("/", "\\").trim('\\')
+                    readRemotePathChecksum(
+                        diskShare = diskShare,
+                        smbPath = normalizedPath,
+                        checksumAlgorithm = checksumAlgorithm,
+                        remotePath = remotePath,
+                    )
+                }
+            }.onFailure {
+                Log.e(
+                    LOG_TAG,
+                    "readRemoteChecksum failed host=${request.host} share=${request.shareName} path=$remotePath reason=${it.message}",
+                )
+                throw it
+            }.getOrThrow()
+        }
+    }
+
+    private fun <T> withDiskShare(
+        request: SmbConnectionRequest,
+        block: (DiskShare) -> T,
+    ): T {
+        return SMBClient().use { smbClient ->
+            smbClient.connect(request.host).use { connection ->
+                val authContext = AuthenticationContext(request.username, request.password.toCharArray(), "")
+                connection.authenticate(authContext).use { session ->
+                    val share = session.connectShare(request.shareName)
+                    try {
+                        val diskShare = share as? DiskShare ?: error("Connected share is not a disk share")
+                        block(diskShare)
+                    } finally {
+                        share.close()
+                    }
+                }
             }
         }
+    }
+
+    private fun verifyRemotePath(
+        diskShare: DiskShare,
+        smbPath: String,
+        expectedSizeBytes: Long,
+        expectedChecksumAlgorithm: String,
+        expectedChecksumValue: String,
+        remotePath: String,
+    ): RemoteVerifyResult {
+        val normalizedAlgorithm = expectedChecksumAlgorithm.trim().uppercase()
+        require(normalizedAlgorithm == CHECKSUM_ALGORITHM_MD5) {
+            "Unsupported checksum algorithm: $expectedChecksumAlgorithm"
+        }
+        val normalizedExpectedChecksum = expectedChecksumValue.trim().lowercase()
+        val remoteChecksum = diskShare.openFile(
+            smbPath,
+            setOf(AccessMask.GENERIC_READ),
+            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+            setOf(SMB2ShareAccess.FILE_SHARE_READ),
+            SMB2CreateDisposition.FILE_OPEN,
+            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+        ).use { stagedFile ->
+            val remoteSizeBytes = stagedFile.getFileInformation(FileStandardInformation::class.java).endOfFile
+            if (remoteSizeBytes != expectedSizeBytes) {
+                throw IOException(
+                    "Remote size mismatch for $remotePath: expected $expectedSizeBytes bytes but found $remoteSizeBytes bytes.",
+                )
+            }
+            stagedFile.inputStream.use { input ->
+                md5(input)
+            }
+        }
+        if (remoteChecksum != normalizedExpectedChecksum) {
+            throw IOException("Remote checksum mismatch for $remotePath after verification.")
+        }
+        val verifiedAtEpochMs = System.currentTimeMillis()
+        Log.i(LOG_TAG, "verifyRemoteFile success path=$remotePath bytes=$expectedSizeBytes")
+        return RemoteVerifyResult(
+            remoteSizeBytes = expectedSizeBytes,
+            checksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
+            checksumValue = remoteChecksum,
+            verifiedAtEpochMs = verifiedAtEpochMs,
+        )
+    }
+
+    private fun readRemotePathChecksum(
+        diskShare: DiskShare,
+        smbPath: String,
+        checksumAlgorithm: String,
+        remotePath: String,
+    ): RemoteVerifyResult {
+        val normalizedAlgorithm = checksumAlgorithm.trim().uppercase()
+        require(normalizedAlgorithm == CHECKSUM_ALGORITHM_MD5) {
+            "Unsupported checksum algorithm: $checksumAlgorithm"
+        }
+        val result = diskShare.openFile(
+            smbPath,
+            setOf(AccessMask.GENERIC_READ),
+            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+            setOf(SMB2ShareAccess.FILE_SHARE_READ),
+            SMB2CreateDisposition.FILE_OPEN,
+            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+        ).use { remoteFile ->
+            val remoteSizeBytes = remoteFile.getFileInformation(FileStandardInformation::class.java).endOfFile
+            val remoteChecksum = remoteFile.inputStream.use { input ->
+                md5(input)
+            }
+            remoteSizeBytes to remoteChecksum
+        }
+        val verifiedAtEpochMs = System.currentTimeMillis()
+        Log.i(LOG_TAG, "readRemoteChecksum success path=$remotePath bytes=${result.first}")
+        return RemoteVerifyResult(
+            remoteSizeBytes = result.first,
+            checksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
+            checksumValue = result.second,
+            verifiedAtEpochMs = verifiedAtEpochMs,
+        )
     }
 
     private fun ensureDirectories(share: DiskShare, remotePath: String) {
@@ -251,6 +454,28 @@ class SmbjClient : SmbClient {
                 share.mkdir(current)
             }
         }
+    }
+
+    private fun temporaryUploadPath(remotePath: String): String {
+        val lastSeparatorIndex = remotePath.lastIndexOf('\\')
+        val directory = if (lastSeparatorIndex >= 0) remotePath.substring(0, lastSeparatorIndex + 1) else ""
+        val filename = if (lastSeparatorIndex >= 0) remotePath.substring(lastSeparatorIndex + 1) else remotePath
+        return "$directory.$filename.nasbox-uploading"
+    }
+
+    private fun md5(inputStream: InputStream): String {
+        val digest = MessageDigest.getInstance("MD5")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = inputStream.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+        return digest.digest().toHexString()
+    }
+
+    private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
     }
 }
 

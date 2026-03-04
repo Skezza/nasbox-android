@@ -101,6 +101,8 @@ class PlansViewModel(
                 filenamePattern = plan.filenamePattern,
                 scheduleEnabled = plan.scheduleEnabled,
                 progressNotificationEnabled = plan.progressNotificationEnabled,
+                checksumVerificationEnabled = plan.checksumVerificationEnabled,
+                pendingScheduledVerify = plan.pendingScheduledVerify,
                 scheduleTimeMinutes = normalizeScheduleMinutes(plan.scheduleTimeMinutes),
                 scheduleFrequency = scheduleFrequency,
                 scheduleDaysMask = scheduleDaysMask,
@@ -203,6 +205,13 @@ class PlansViewModel(
     fun updateEditorFilenamePattern(value: String) { _editorState.value = _editorState.value.copy(filenamePattern = value) }
     fun updateEditorProgressNotificationEnabled(value: Boolean) {
         _editorState.value = _editorState.value.copy(progressNotificationEnabled = value)
+    }
+    fun updateEditorChecksumVerificationEnabled(value: Boolean) {
+        val state = _editorState.value
+        _editorState.value = state.copy(
+            checksumVerificationEnabled = value,
+            pendingScheduledVerify = if (value) state.pendingScheduledVerify else false,
+        )
     }
     fun updateEditorScheduleEnabled(value: Boolean) { _editorState.value = _editorState.value.copy(scheduleEnabled = value) }
     fun updateEditorScheduleTimeMinutes(value: Int) {
@@ -350,6 +359,98 @@ class PlansViewModel(
         }
     }
 
+    fun togglePlanChecksumVerification(planId: Long, enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching {
+                val plan = planRepository.getPlan(planId) ?: throw IllegalStateException("Plan not found")
+                planRepository.updatePlan(
+                    plan.copy(
+                        checksumVerificationEnabled = enabled,
+                        pendingScheduledVerify = if (enabled) plan.pendingScheduledVerify else false,
+                    ),
+                )
+            }.onSuccess {
+                _message.value = if (enabled) {
+                    "Checksum verification enabled for future uploads."
+                } else {
+                    "Checksum verification disabled."
+                }
+            }.onFailure {
+                _message.value = "Unable to update checksum verification."
+            }
+        }
+    }
+
+    fun togglePendingScheduledVerify(planId: Long) {
+        viewModelScope.launch {
+            runCatching {
+                val plan = planRepository.getPlan(planId) ?: throw IllegalStateException("Plan not found")
+                if (!plan.enabled || !plan.scheduleEnabled || !plan.checksumVerificationEnabled) {
+                    return@runCatching null
+                }
+                val nextValue = !plan.pendingScheduledVerify
+                planRepository.updatePlan(
+                    plan.copy(
+                        pendingScheduledVerify = nextValue,
+                    ),
+                )
+                nextValue
+            }.onSuccess { nextValue ->
+                nextValue ?: return@onSuccess
+                _message.value = if (nextValue) {
+                    "Next auto-run will verify and save checksums."
+                } else {
+                    "Scheduled verify canceled."
+                }
+            }.onFailure {
+                _message.value = "Unable to update scheduled verification."
+            }
+        }
+    }
+
+    fun verifyPlanNow(planId: Long) {
+        viewModelScope.launch {
+            var previousPlan: PlanEntity? = null
+            var updatedForVerify = false
+            runCatching {
+                val plan = planRepository.getPlan(planId) ?: throw IllegalStateException("Plan not found")
+                if (!plan.enabled || !plan.scheduleEnabled || !plan.checksumVerificationEnabled) {
+                    return@runCatching PlanRunEnqueueResult.IGNORED_DISABLED
+                }
+                previousPlan = plan
+                if (!plan.pendingScheduledVerify) {
+                    planRepository.updatePlan(plan.copy(pendingScheduledVerify = true))
+                    updatedForVerify = true
+                }
+                enqueuePlanRunUseCase(planId, RunTriggerSource.SCHEDULED)
+            }.onSuccess { result ->
+                when (result) {
+                    PlanRunEnqueueResult.ENQUEUED -> {
+                        _message.value = "Verification started."
+                    }
+
+                    PlanRunEnqueueResult.COALESCED,
+                    PlanRunEnqueueResult.IGNORED_ALREADY_ACTIVE,
+                    -> {
+                        _message.value = "Verification queued after the current run."
+                    }
+
+                    PlanRunEnqueueResult.IGNORED_DISABLED -> {
+                        if (updatedForVerify && previousPlan != null) {
+                            planRepository.updatePlan(previousPlan!!)
+                        }
+                        _message.value = "Verification requires an enabled auto-run job."
+                    }
+                }
+            }.onFailure {
+                if (updatedForVerify && previousPlan != null) {
+                    runCatching { planRepository.updatePlan(previousPlan!!) }
+                }
+                _message.value = "Unable to start verification now."
+            }
+        }
+    }
+
     private suspend fun maybeApplyFirstPlanDefaults(albums: List<MediaAlbum>) {
         val state = _editorState.value
         if (state.editingPlanId != null || state.name.isNotBlank()) return
@@ -413,6 +514,8 @@ data class PlanListItemUiState(
     val filenamePattern: String,
     val scheduleEnabled: Boolean,
     val progressNotificationEnabled: Boolean,
+    val checksumVerificationEnabled: Boolean,
+    val pendingScheduledVerify: Boolean,
     val scheduleTimeMinutes: Int,
     val scheduleFrequency: PlanScheduleFrequency,
     val scheduleDaysMask: Int,
@@ -435,6 +538,7 @@ data class PlanServerOption(
 
 data class PlanEditorUiState(
     val editingPlanId: Long? = null,
+    val importedAtEpochMs: Long? = null,
     val name: String = "",
     val enabled: Boolean = true,
     val sourceType: PlanSourceType = PlanSourceType.ALBUM,
@@ -446,6 +550,8 @@ data class PlanEditorUiState(
     val directoryTemplate: String = "",
     val filenamePattern: String = "",
     val progressNotificationEnabled: Boolean = true,
+    val checksumVerificationEnabled: Boolean = true,
+    val pendingScheduledVerify: Boolean = false,
     val scheduleEnabled: Boolean = false,
     val scheduleTimeMinutes: Int = PLAN_DEFAULT_SCHEDULE_MINUTES,
     val scheduleFrequency: PlanScheduleFrequency = PlanScheduleFrequency.DAILY,
@@ -501,6 +607,7 @@ private fun decodeUriComponent(value: String): String = runCatching {
 internal fun editorStateFromPlanEntity(plan: PlanEntity): PlanEditorUiState {
     return PlanEditorUiState(
         editingPlanId = plan.planId,
+        importedAtEpochMs = plan.importedAtEpochMs,
         name = plan.name,
         enabled = plan.enabled,
         sourceType = parsePlanSourceType(plan.sourceType),
@@ -512,6 +619,8 @@ internal fun editorStateFromPlanEntity(plan: PlanEntity): PlanEditorUiState {
         directoryTemplate = plan.directoryTemplate,
         filenamePattern = plan.filenamePattern,
         progressNotificationEnabled = plan.progressNotificationEnabled,
+        checksumVerificationEnabled = plan.checksumVerificationEnabled,
+        pendingScheduledVerify = plan.pendingScheduledVerify,
         scheduleEnabled = plan.scheduleEnabled,
         scheduleTimeMinutes = normalizeScheduleMinutes(plan.scheduleTimeMinutes),
         scheduleFrequency = PlanScheduleFrequency.fromRaw(plan.scheduleFrequency),
@@ -541,6 +650,13 @@ internal fun planEntityFromEditorState(state: PlanEditorUiState): PlanEntity {
         filenamePattern = if (isAlbum && state.useAlbumTemplating) state.filenamePattern.trim() else "",
         enabled = state.enabled,
         progressNotificationEnabled = state.progressNotificationEnabled,
+        checksumVerificationEnabled = state.checksumVerificationEnabled,
+        pendingScheduledVerify = when {
+            !state.checksumVerificationEnabled -> false
+            !state.scheduleEnabled -> false
+            else -> state.pendingScheduledVerify
+        },
+        importedAtEpochMs = state.importedAtEpochMs,
         scheduleEnabled = state.scheduleEnabled,
         scheduleTimeMinutes = normalizeScheduleMinutes(state.scheduleTimeMinutes),
         scheduleFrequency = state.scheduleFrequency.name,

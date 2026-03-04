@@ -38,6 +38,8 @@ class DefaultBackupRecordRepositoryTest {
 
         override suspend fun insert(record: BackupRecordEntity): Long = record.recordId
 
+        override suspend fun update(record: BackupRecordEntity) = Unit
+
         override suspend fun getByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity? = null
 
         override suspend fun getByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity> {
@@ -52,5 +54,19 @@ class DefaultBackupRecordRepositoryTest {
                 )
             }
         }
+
+        override suspend fun getByPlanPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> = emptyList()
+
+        override suspend fun countByPlan(planId: Long): Int = 0
+
+        override suspend fun getChecksummedByPlanPage(
+            planId: Long,
+            afterRecordId: Long,
+            limit: Int,
+        ): List<BackupRecordEntity> = emptyList()
+
+        override suspend fun countChecksummedByPlan(planId: Long): Int = 0
+
+        override suspend fun getForPlan(planId: Long): List<BackupRecordEntity> = emptyList()
     }
 }

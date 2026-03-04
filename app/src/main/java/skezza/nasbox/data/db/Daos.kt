@@ -23,6 +23,9 @@ interface ServerDao {
 
     @Query("SELECT * FROM servers WHERE server_id = :serverId")
     suspend fun getById(serverId: Long): ServerEntity?
+
+    @Query("SELECT * FROM servers ORDER BY server_id")
+    suspend fun getAll(): List<ServerEntity>
 }
 
 @Dao
@@ -41,6 +44,9 @@ interface PlanDao {
 
     @Query("SELECT * FROM plans WHERE plan_id = :planId")
     suspend fun getById(planId: Long): PlanEntity?
+
+    @Query("SELECT * FROM plans ORDER BY plan_id")
+    suspend fun getAll(): List<PlanEntity>
 }
 
 @Dao
@@ -48,11 +54,54 @@ interface BackupRecordDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(record: BackupRecordEntity): Long
 
+    @Update
+    suspend fun update(record: BackupRecordEntity)
+
     @Query("SELECT * FROM backup_records WHERE plan_id = :planId AND media_item_id = :mediaItemId")
     suspend fun getByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity?
 
     @Query("SELECT * FROM backup_records WHERE plan_id = :planId AND media_item_id IN (:mediaItemIds)")
     suspend fun getByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity>
+
+    @Query(
+        """
+        SELECT * FROM backup_records
+        WHERE plan_id = :planId
+          AND record_id > :afterRecordId
+        ORDER BY record_id
+        LIMIT :limit
+        """,
+    )
+    suspend fun getByPlanPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
+
+    @Query("SELECT COUNT(*) FROM backup_records WHERE plan_id = :planId")
+    suspend fun countByPlan(planId: Long): Int
+
+    @Query(
+        """
+        SELECT * FROM backup_records
+        WHERE plan_id = :planId
+          AND checksum_value IS NOT NULL
+          AND checksum_algorithm = 'MD5'
+          AND record_id > :afterRecordId
+        ORDER BY record_id
+        LIMIT :limit
+        """,
+    )
+    suspend fun getChecksummedByPlanPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM backup_records
+        WHERE plan_id = :planId
+          AND checksum_value IS NOT NULL
+          AND checksum_algorithm = 'MD5'
+        """,
+    )
+    suspend fun countChecksummedByPlan(planId: Long): Int
+
+    @Query("SELECT * FROM backup_records WHERE plan_id = :planId ORDER BY record_id")
+    suspend fun getForPlan(planId: Long): List<BackupRecordEntity>
 }
 
 @Dao

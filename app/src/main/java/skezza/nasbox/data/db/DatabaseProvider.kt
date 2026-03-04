@@ -76,6 +76,30 @@ object DatabaseProvider {
         }
     }
 
+    private val migration8To9 = object : Migration(8, 9) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL(
+                "ALTER TABLE plans ADD COLUMN checksum_verification_enabled INTEGER NOT NULL DEFAULT 0",
+            )
+            database.execSQL(
+                "ALTER TABLE plans ADD COLUMN pending_scheduled_verify INTEGER NOT NULL DEFAULT 0",
+            )
+            database.execSQL("ALTER TABLE backup_records ADD COLUMN verified_size_bytes INTEGER")
+            database.execSQL("ALTER TABLE backup_records ADD COLUMN checksum_algorithm TEXT")
+            database.execSQL("ALTER TABLE backup_records ADD COLUMN checksum_value TEXT")
+            database.execSQL("ALTER TABLE backup_records ADD COLUMN checksum_verified_at_epoch_ms INTEGER")
+            database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_backup_records_plan_id_record_id ON backup_records(plan_id, record_id)",
+            )
+        }
+    }
+
+    private val migration9To10 = object : Migration(9, 10) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE plans ADD COLUMN imported_at_epoch_ms INTEGER")
+        }
+    }
+
     fun get(context: Context): NasBoxDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
@@ -90,6 +114,8 @@ object DatabaseProvider {
                 migration5To6,
                 migration6To7,
                 migration7To8,
+                migration8To9,
+                migration9To10,
             )
                 .build().also { instance = it }
         }

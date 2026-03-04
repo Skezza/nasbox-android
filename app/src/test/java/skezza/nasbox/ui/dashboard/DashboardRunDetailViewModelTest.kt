@@ -339,10 +339,22 @@ class DashboardRunDetailViewModelTest {
     private class FakeBackupRecordRepository : BackupRecordRepository {
         override suspend fun create(record: BackupRecordEntity): Long = record.recordId
 
+        override suspend fun update(record: BackupRecordEntity) = Unit
+
         override suspend fun findByPlanAndMediaItem(planId: Long, mediaItemId: String): BackupRecordEntity? = null
 
         override suspend fun findByPlanAndMediaItems(planId: Long, mediaItemIds: List<String>): List<BackupRecordEntity> =
             emptyList()
+
+        override suspend fun pageForPlan(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> =
+            emptyList()
+
+        override suspend fun countForPlan(planId: Long): Int = 0
+
+        override suspend fun checksummedPage(planId: Long, afterRecordId: Long, limit: Int): List<BackupRecordEntity> =
+            emptyList()
+
+        override suspend fun countChecksummed(planId: Long): Int = 0
     }
 
     private class FakeServerRepository(
