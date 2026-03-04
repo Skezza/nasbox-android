@@ -153,6 +153,12 @@ private fun Throwable.toBrowseFailure(): SmbBrowseResult.Failure {
             technicalDetail = message,
         )
 
+        is SmbConnectionFailure.RemoteFileBusy -> SmbBrowseResult.Failure(
+            message = "Remote file is temporarily locked.",
+            recoveryHint = "Retry shortly; another process may still hold a lock.",
+            technicalDetail = message,
+        )
+
         is SmbConnectionFailure.Timeout,
         is SmbConnectionFailure.NetworkInterruption -> SmbBrowseResult.Failure(
             message = "Browse timed out or was interrupted.",

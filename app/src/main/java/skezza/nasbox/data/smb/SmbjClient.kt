@@ -4,6 +4,7 @@ import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.msfscc.fileinformation.FileStandardInformation
+import com.hierynomus.mssmb2.SMBApiException
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2CreateOptions
 import com.hierynomus.mssmb2.SMB2ShareAccess
@@ -30,6 +31,8 @@ class SmbjClient : SmbClient {
         private const val LOG_TAG = "NasBoxSmb"
         private const val BROWSE_TAG = "NasBoxBrowse"
         private const val CHECKSUM_ALGORITHM_MD5 = "MD5"
+        private const val OPEN_FILE_MAX_ATTEMPTS = 4
+        private val OPEN_FILE_RETRY_DELAYS_MS = longArrayOf(250L, 500L, 1_000L)
     }
 
     override suspend fun testConnection(request: SmbConnectionRequest): SmbConnectionResult = withContext(Dispatchers.IO) {
@@ -208,17 +211,10 @@ class SmbjClient : SmbClient {
                     val finalSmbPath = normalizedPath.replace('/', '\\')
                     val tempSmbPath = temporaryUploadPath(finalSmbPath)
                     var renamedToFinalPath = false
-                    diskShare.openFile(
-                        tempSmbPath,
-                        setOf(AccessMask.GENERIC_WRITE),
-                        setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
-                        setOf(SMB2ShareAccess.FILE_SHARE_READ),
-                        SMB2CreateDisposition.FILE_OVERWRITE_IF,
-                        setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-                    ).use { file ->
-                        try {
-                            val digest = if (verifyChecksum) MessageDigest.getInstance(CHECKSUM_ALGORITHM_MD5) else null
-                            var totalWritten = 0L
+                    try {
+                        val digest = if (verifyChecksum) MessageDigest.getInstance(CHECKSUM_ALGORITHM_MD5) else null
+                        var totalWritten = 0L
+                        openFileForWriteWithRetry(diskShare, tempSmbPath).use { file ->
                             file.outputStream.use { output ->
                                 val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                                 while (true) {
@@ -230,46 +226,47 @@ class SmbjClient : SmbClient {
                                     onProgressBytes(totalWritten)
                                 }
                                 output.flush()
-                                if (contentLengthBytes != null && totalWritten != contentLengthBytes) {
-                                    throw IOException(
-                                        "Upload truncated for $remotePath: wrote $totalWritten of $contentLengthBytes bytes.",
+                            }
+                        }
+                        if (contentLengthBytes != null && totalWritten != contentLengthBytes) {
+                            throw IOException(
+                                "Upload truncated for $remotePath: wrote $totalWritten of $contentLengthBytes bytes.",
+                            )
+                        }
+                        Log.i(LOG_TAG, "uploadFile staged path=$remotePath bytes=$totalWritten")
+                        val verificationResult = if (verifyChecksum) {
+                            // Writer handle is closed before read-back verification to avoid self-locking.
+                            verifyRemotePath(
+                                diskShare = diskShare,
+                                smbPath = tempSmbPath,
+                                expectedSizeBytes = totalWritten,
+                                expectedChecksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
+                                expectedChecksumValue = digest!!.digest().toHexString(),
+                                remotePath = remotePath,
+                            )
+                        } else {
+                            null
+                        }
+                        renamePathWithRetry(diskShare, tempSmbPath, finalSmbPath)
+                        renamedToFinalPath = true
+                        Log.i(LOG_TAG, "uploadFile complete path=$remotePath")
+                        UploadFileResult(
+                            remoteSizeBytes = verificationResult?.remoteSizeBytes ?: totalWritten,
+                            checksumAlgorithm = verificationResult?.checksumAlgorithm,
+                            checksumValue = verificationResult?.checksumValue,
+                            checksumVerifiedAtEpochMs = verificationResult?.verifiedAtEpochMs,
+                        )
+                    } catch (throwable: Throwable) {
+                        if (!renamedToFinalPath) {
+                            runCatching { diskShare.rm(tempSmbPath) }
+                                .onFailure {
+                                    Log.w(
+                                        LOG_TAG,
+                                        "uploadFile temp cleanup failed path=$tempSmbPath reason=${it.message}",
                                     )
                                 }
-                                Log.i(LOG_TAG, "uploadFile staged path=$remotePath bytes=$totalWritten")
-                            }
-                            val verificationResult = if (verifyChecksum) {
-                                verifyRemotePath(
-                                    diskShare = diskShare,
-                                    smbPath = tempSmbPath,
-                                    expectedSizeBytes = totalWritten,
-                                    expectedChecksumAlgorithm = CHECKSUM_ALGORITHM_MD5,
-                                    expectedChecksumValue = digest!!.digest().toHexString(),
-                                    remotePath = remotePath,
-                                )
-                            } else {
-                                null
-                            }
-                            file.rename(finalSmbPath, true)
-                            renamedToFinalPath = true
-                            Log.i(LOG_TAG, "uploadFile complete path=$remotePath")
-                            UploadFileResult(
-                                remoteSizeBytes = verificationResult?.remoteSizeBytes ?: totalWritten,
-                                checksumAlgorithm = verificationResult?.checksumAlgorithm,
-                                checksumValue = verificationResult?.checksumValue,
-                                checksumVerifiedAtEpochMs = verificationResult?.verifiedAtEpochMs,
-                            )
-                        } catch (throwable: Throwable) {
-                            if (!renamedToFinalPath) {
-                                runCatching { diskShare.rm(tempSmbPath) }
-                                    .onFailure {
-                                        Log.w(
-                                            LOG_TAG,
-                                            "uploadFile temp cleanup failed path=$tempSmbPath reason=${it.message}",
-                                        )
-                                    }
-                            }
-                            throw throwable
                         }
+                        throw throwable
                     }
                 }
             }.onFailure {
@@ -280,6 +277,118 @@ class SmbjClient : SmbClient {
                 throw it
             }.getOrThrow()
         }
+    }
+
+    private fun openFileForWriteWithRetry(
+        diskShare: DiskShare,
+        smbPath: String,
+        createDisposition: SMB2CreateDisposition = SMB2CreateDisposition.FILE_OVERWRITE_IF,
+    ): com.hierynomus.smbj.share.File {
+        var attempt = 1
+        var lastError: Throwable? = null
+        while (attempt <= OPEN_FILE_MAX_ATTEMPTS) {
+            val openAttempt = runCatching {
+                diskShare.openFile(
+                    smbPath,
+                    setOf(AccessMask.GENERIC_WRITE),
+                    setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+                    setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                    createDisposition,
+                    setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+                )
+            }
+            val openedFile = openAttempt.getOrNull()
+            if (openedFile != null) return openedFile
+
+            lastError = openAttempt.exceptionOrNull()
+            val retryable = lastError?.isSharingViolation() == true
+            if (!retryable || attempt >= OPEN_FILE_MAX_ATTEMPTS) {
+                throw lastError ?: IllegalStateException("Failed to open remote file without an exception.")
+            }
+            val delayMs = OPEN_FILE_RETRY_DELAYS_MS.getOrElse(attempt - 1) { OPEN_FILE_RETRY_DELAYS_MS.last() }
+            Log.w(
+                LOG_TAG,
+                "openFile(write) retry path=$smbPath attempt=$attempt/$OPEN_FILE_MAX_ATTEMPTS waitMs=$delayMs reason=${lastError?.message}",
+                lastError,
+            )
+            Thread.sleep(delayMs)
+            attempt += 1
+        }
+        throw lastError ?: IllegalStateException("Failed to open remote file after retries.")
+    }
+
+    private fun openFileForReadWithRetry(
+        diskShare: DiskShare,
+        smbPath: String,
+    ): com.hierynomus.smbj.share.File {
+        var attempt = 1
+        var lastError: Throwable? = null
+        while (attempt <= OPEN_FILE_MAX_ATTEMPTS) {
+            val openAttempt = runCatching {
+                diskShare.openFile(
+                    smbPath,
+                    setOf(AccessMask.GENERIC_READ),
+                    setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
+                    setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                    SMB2CreateDisposition.FILE_OPEN,
+                    setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
+                )
+            }
+            val openedFile = openAttempt.getOrNull()
+            if (openedFile != null) return openedFile
+
+            lastError = openAttempt.exceptionOrNull()
+            val retryable = lastError?.isSharingViolation() == true
+            if (!retryable || attempt >= OPEN_FILE_MAX_ATTEMPTS) {
+                throw lastError ?: IllegalStateException("Failed to open remote file without an exception.")
+            }
+            val delayMs = OPEN_FILE_RETRY_DELAYS_MS.getOrElse(attempt - 1) { OPEN_FILE_RETRY_DELAYS_MS.last() }
+            Log.w(
+                LOG_TAG,
+                "openFile(read) retry path=$smbPath attempt=$attempt/$OPEN_FILE_MAX_ATTEMPTS waitMs=$delayMs reason=${lastError?.message}",
+                lastError,
+            )
+            Thread.sleep(delayMs)
+            attempt += 1
+        }
+        throw lastError ?: IllegalStateException("Failed to open remote file after retries.")
+    }
+
+    private fun renamePathWithRetry(
+        diskShare: DiskShare,
+        sourceSmbPath: String,
+        destinationSmbPath: String,
+    ) {
+        var attempt = 1
+        var lastError: Throwable? = null
+        while (attempt <= OPEN_FILE_MAX_ATTEMPTS) {
+            val renameAttempt = runCatching {
+                openFileForWriteWithRetry(
+                    diskShare = diskShare,
+                    smbPath = sourceSmbPath,
+                    createDisposition = SMB2CreateDisposition.FILE_OPEN,
+                ).use { tempFile ->
+                    tempFile.rename(destinationSmbPath, true)
+                }
+            }
+            if (renameAttempt.isSuccess) {
+                return
+            }
+            lastError = renameAttempt.exceptionOrNull()
+            val retryable = lastError?.isSharingViolation() == true
+            if (!retryable || attempt >= OPEN_FILE_MAX_ATTEMPTS) {
+                throw lastError ?: IllegalStateException("Failed to rename remote temp file without an exception.")
+            }
+            val delayMs = OPEN_FILE_RETRY_DELAYS_MS.getOrElse(attempt - 1) { OPEN_FILE_RETRY_DELAYS_MS.last() }
+            Log.w(
+                LOG_TAG,
+                "rename retry path=$sourceSmbPath -> $destinationSmbPath attempt=$attempt/$OPEN_FILE_MAX_ATTEMPTS waitMs=$delayMs reason=${lastError?.message}",
+                lastError,
+            )
+            Thread.sleep(delayMs)
+            attempt += 1
+        }
+        throw lastError ?: IllegalStateException("Failed to rename remote temp file after retries.")
     }
 
     override suspend fun verifyRemoteFile(
@@ -379,14 +488,7 @@ class SmbjClient : SmbClient {
             "Unsupported checksum algorithm: $expectedChecksumAlgorithm"
         }
         val normalizedExpectedChecksum = expectedChecksumValue.trim().lowercase()
-        val remoteChecksum = diskShare.openFile(
-            smbPath,
-            setOf(AccessMask.GENERIC_READ),
-            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
-            setOf(SMB2ShareAccess.FILE_SHARE_READ),
-            SMB2CreateDisposition.FILE_OPEN,
-            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-        ).use { stagedFile ->
+        val remoteChecksum = openFileForReadWithRetry(diskShare, smbPath).use { stagedFile ->
             val remoteSizeBytes = stagedFile.getFileInformation(FileStandardInformation::class.java).endOfFile
             if (remoteSizeBytes != expectedSizeBytes) {
                 throw IOException(
@@ -420,14 +522,7 @@ class SmbjClient : SmbClient {
         require(normalizedAlgorithm == CHECKSUM_ALGORITHM_MD5) {
             "Unsupported checksum algorithm: $checksumAlgorithm"
         }
-        val result = diskShare.openFile(
-            smbPath,
-            setOf(AccessMask.GENERIC_READ),
-            setOf(FileAttributes.FILE_ATTRIBUTE_NORMAL),
-            setOf(SMB2ShareAccess.FILE_SHARE_READ),
-            SMB2CreateDisposition.FILE_OPEN,
-            setOf(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE),
-        ).use { remoteFile ->
+        val result = openFileForReadWithRetry(diskShare, smbPath).use { remoteFile ->
             val remoteSizeBytes = remoteFile.getFileInformation(FileStandardInformation::class.java).endOfFile
             val remoteChecksum = remoteFile.inputStream.use { input ->
                 md5(input)
@@ -479,6 +574,15 @@ class SmbjClient : SmbClient {
     }
 }
 
+private fun Throwable.isSharingViolation(): Boolean {
+    if (this is SMBApiException) {
+        val statusText = statusCode.toString().lowercase()
+        if ("sharing" in statusText || "violation" in statusText) return true
+    }
+    val messageText = message.orEmpty().lowercase()
+    return "status_sharing_violation" in messageText || "sharing violation" in messageText
+}
+
 fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {
     is UnknownHostException -> SmbConnectionFailure.HostUnreachable(this)
     is SocketTimeoutException -> SmbConnectionFailure.Timeout(this)
@@ -489,6 +593,7 @@ fun Throwable.toSmbConnectionFailure(): SmbConnectionFailure = when (this) {
             "logon failure" in message || "status_logon_failure" in message -> SmbConnectionFailure.AuthenticationFailed(this)
             "bad network name" in message || "status_bad_network_name" in message -> SmbConnectionFailure.ShareNotFound(this)
             "access denied" in message || "status_access_denied" in message -> SmbConnectionFailure.RemotePermissionDenied(this)
+            "status_sharing_violation" in message || "sharing violation" in message -> SmbConnectionFailure.RemoteFileBusy(this)
             "timeout" in message -> SmbConnectionFailure.Timeout(this)
             else -> SmbConnectionFailure.Unknown(this)
         }
@@ -502,6 +607,7 @@ sealed class SmbConnectionFailure(
     class AuthenticationFailed(causeError: Throwable) : SmbConnectionFailure(causeError)
     class ShareNotFound(causeError: Throwable) : SmbConnectionFailure(causeError)
     class RemotePermissionDenied(causeError: Throwable) : SmbConnectionFailure(causeError)
+    class RemoteFileBusy(causeError: Throwable) : SmbConnectionFailure(causeError)
     class Timeout(causeError: Throwable) : SmbConnectionFailure(causeError)
     class NetworkInterruption(causeError: Throwable) : SmbConnectionFailure(causeError)
     class Unknown(causeError: Throwable) : SmbConnectionFailure(causeError)

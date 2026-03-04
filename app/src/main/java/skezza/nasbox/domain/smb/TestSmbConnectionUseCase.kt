@@ -174,6 +174,12 @@ private fun SmbConnectionFailure.toUiError(): MappedSmbError = when (this) {
         recoveryHint = "Ensure the account has permission to access the share.",
     )
 
+    is SmbConnectionFailure.RemoteFileBusy -> MappedSmbError(
+        category = SmbErrorCategory.UNKNOWN,
+        message = "Remote file is temporarily locked.",
+        recoveryHint = "Retry shortly; another process may still hold a lock.",
+    )
+
     is SmbConnectionFailure.Timeout, is SmbConnectionFailure.NetworkInterruption -> MappedSmbError(
         category = SmbErrorCategory.TIMEOUT_OR_INTERRUPTED,
         message = "Connection timed out or was interrupted.",

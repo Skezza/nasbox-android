@@ -1501,6 +1501,7 @@ private fun skezza.nasbox.data.smb.SmbConnectionFailure.toUserMessage(): String 
     is skezza.nasbox.data.smb.SmbConnectionFailure.AuthenticationFailed -> "Authentication failed. Verify username and password."
     is skezza.nasbox.data.smb.SmbConnectionFailure.ShareNotFound -> "SMB share not found."
     is skezza.nasbox.data.smb.SmbConnectionFailure.RemotePermissionDenied -> "Remote permissions denied upload access."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.RemoteFileBusy -> "Remote file is locked. Retrying later usually succeeds."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout -> "Connection timed out while uploading."
     is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption -> "Network interrupted during upload."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Upload failed due to an unknown connection issue."
@@ -1512,6 +1513,8 @@ private fun skezza.nasbox.data.smb.SmbConnectionFailure.toAuditUserMessage(media
     is skezza.nasbox.data.smb.SmbConnectionFailure.ShareNotFound -> "SMB share not found during scheduled verify."
     is skezza.nasbox.data.smb.SmbConnectionFailure.RemotePermissionDenied ->
         "Remote permissions denied verification access for item $mediaItemId."
+    is skezza.nasbox.data.smb.SmbConnectionFailure.RemoteFileBusy ->
+        "Remote file is locked during scheduled verify for item $mediaItemId."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Timeout -> "Connection timed out during scheduled verify."
     is skezza.nasbox.data.smb.SmbConnectionFailure.NetworkInterruption -> "Network interrupted during scheduled verify."
     is skezza.nasbox.data.smb.SmbConnectionFailure.Unknown -> "Scheduled verify failed for item $mediaItemId."
