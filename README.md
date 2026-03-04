@@ -14,16 +14,12 @@ The app is built with Kotlin, Jetpack Compose, Room, WorkManager, and SMBJ. It s
 
 ### App screenshots
 
-<p align="center">
-  <img src="screenshots/2026-03-04-phone/dashboard.png" alt="NASBox dashboard" width="220" />
-  <img src="screenshots/2026-03-04-phone/jobs.png" alt="NASBox jobs" width="220" />
-  <img src="screenshots/2026-03-04-phone/servers.png" alt="NASBox servers" width="220" />
-</p>
+<img width="1220" height="2712" alt="about_transfer" src="https://github.com/user-attachments/assets/1c4ad46e-4068-4dd0-baf0-bfc4df732ffe" />
+<img width="1220" height="2712" alt="servers" src="https://github.com/user-attachments/assets/48509751-45d1-4494-929c-a8b772aa94b1" />
+<img width="1220" height="2712" alt="jobs" src="https://github.com/user-attachments/assets/a25d4a8e-e88c-48d9-afa2-81df4ce07abd" />
+<img width="1220" height="2712" alt="job_editor" src="https://github.com/user-attachments/assets/769ccd75-ccb0-4744-bd49-35e0cada51b9" />
+<img width="1220" height="2712" alt="dashboard" src="https://github.com/user-attachments/assets/f4e54648-973b-474c-8dc4-b1e47ede6e8b" />
 
-<p align="center">
-  <img src="screenshots/2026-03-04-phone/about_transfer.png" alt="NASBox transfer profile screen" width="220" />
-  <img src="screenshots/2026-03-04-phone/job_editor.png" alt="NASBox job editor" width="220" />
-</p>
 
 ## What it does
 
@@ -61,7 +57,6 @@ Clone the repo and build from the project root:
 
 ```bash
 ./gradlew assembleDebug
-```
 
 Install to a connected device or running emulator:
 
