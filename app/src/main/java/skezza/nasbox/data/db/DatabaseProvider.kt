@@ -94,6 +94,12 @@ object DatabaseProvider {
         }
     }
 
+    private val migration9To10 = object : Migration(9, 10) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE plans ADD COLUMN imported_at_epoch_ms INTEGER")
+        }
+    }
+
     fun get(context: Context): NasBoxDatabase {
         return instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
@@ -109,6 +115,7 @@ object DatabaseProvider {
                 migration6To7,
                 migration7To8,
                 migration8To9,
+                migration9To10,
             )
                 .build().also { instance = it }
         }

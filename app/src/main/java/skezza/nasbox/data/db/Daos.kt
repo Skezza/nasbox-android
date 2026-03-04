@@ -23,6 +23,9 @@ interface ServerDao {
 
     @Query("SELECT * FROM servers WHERE server_id = :serverId")
     suspend fun getById(serverId: Long): ServerEntity?
+
+    @Query("SELECT * FROM servers ORDER BY server_id")
+    suspend fun getAll(): List<ServerEntity>
 }
 
 @Dao
@@ -41,6 +44,9 @@ interface PlanDao {
 
     @Query("SELECT * FROM plans WHERE plan_id = :planId")
     suspend fun getById(planId: Long): PlanEntity?
+
+    @Query("SELECT * FROM plans ORDER BY plan_id")
+    suspend fun getAll(): List<PlanEntity>
 }
 
 @Dao
@@ -93,6 +99,9 @@ interface BackupRecordDao {
         """,
     )
     suspend fun countChecksummedByPlan(planId: Long): Int
+
+    @Query("SELECT * FROM backup_records WHERE plan_id = :planId ORDER BY record_id")
+    suspend fun getForPlan(planId: Long): List<BackupRecordEntity>
 }
 
 @Dao

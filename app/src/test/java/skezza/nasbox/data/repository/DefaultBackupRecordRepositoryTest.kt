@@ -66,5 +66,7 @@ class DefaultBackupRecordRepositoryTest {
         ): List<BackupRecordEntity> = emptyList()
 
         override suspend fun countChecksummedByPlan(planId: Long): Int = 0
+
+        override suspend fun getForPlan(planId: Long): List<BackupRecordEntity> = emptyList()
     }
 }

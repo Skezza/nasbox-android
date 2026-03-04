@@ -538,6 +538,7 @@ data class PlanServerOption(
 
 data class PlanEditorUiState(
     val editingPlanId: Long? = null,
+    val importedAtEpochMs: Long? = null,
     val name: String = "",
     val enabled: Boolean = true,
     val sourceType: PlanSourceType = PlanSourceType.ALBUM,
@@ -606,6 +607,7 @@ private fun decodeUriComponent(value: String): String = runCatching {
 internal fun editorStateFromPlanEntity(plan: PlanEntity): PlanEditorUiState {
     return PlanEditorUiState(
         editingPlanId = plan.planId,
+        importedAtEpochMs = plan.importedAtEpochMs,
         name = plan.name,
         enabled = plan.enabled,
         sourceType = parsePlanSourceType(plan.sourceType),
@@ -654,6 +656,7 @@ internal fun planEntityFromEditorState(state: PlanEditorUiState): PlanEntity {
             !state.scheduleEnabled -> false
             else -> state.pendingScheduledVerify
         },
+        importedAtEpochMs = state.importedAtEpochMs,
         scheduleEnabled = state.scheduleEnabled,
         scheduleTimeMinutes = normalizeScheduleMinutes(state.scheduleTimeMinutes),
         scheduleFrequency = state.scheduleFrequency.name,

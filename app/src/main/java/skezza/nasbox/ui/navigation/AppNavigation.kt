@@ -33,6 +33,7 @@ import skezza.nasbox.ui.audit.AuditRunDetailScreen
 import skezza.nasbox.ui.audit.AuditScreen
 import skezza.nasbox.ui.audit.AuditViewModel
 import skezza.nasbox.ui.about.AboutScreen
+import skezza.nasbox.ui.about.AboutViewModel
 import skezza.nasbox.ui.dashboard.DashboardRunDetailScreen
 import skezza.nasbox.ui.dashboard.DashboardRunDetailViewModel
 import skezza.nasbox.ui.dashboard.DashboardScreen
@@ -117,6 +118,12 @@ fun NasBoxApp(
             serverRepository = appContainer.serverRepository,
             runRepository = appContainer.runRepository,
             runLogRepository = appContainer.runLogRepository,
+        ),
+    )
+    val aboutViewModel: AboutViewModel = viewModel(
+        factory = AboutViewModel.factory(
+            exportBackupSetsUseCase = appContainer.exportBackupSetsUseCase,
+            importBackupSetsUseCase = appContainer.importBackupSetsUseCase,
         ),
     )
 
@@ -256,6 +263,7 @@ fun NasBoxApp(
             }
             composable(ROUTE_ABOUT) {
                 AboutScreen(
+                    viewModel = aboutViewModel,
                     onBack = { navController.popBackStack() },
                 )
             }

@@ -35,6 +35,7 @@ class PlansViewModelMappingTest {
             scheduleIntervalHours = 12,
             checksumVerificationEnabled = true,
             pendingScheduledVerify = true,
+            importedAtEpochMs = 9876L,
         )
 
         val editorState = editorStateFromPlanEntity(plan)
@@ -53,8 +54,10 @@ class PlansViewModelMappingTest {
         assertEquals(plan.progressNotificationEnabled, mappedBack.progressNotificationEnabled)
         assertTrue(editorState.checksumVerificationEnabled)
         assertTrue(editorState.pendingScheduledVerify)
+        assertEquals(9876L, editorState.importedAtEpochMs)
         assertTrue(mappedBack.checksumVerificationEnabled)
         assertTrue(mappedBack.pendingScheduledVerify)
+        assertEquals(9876L, mappedBack.importedAtEpochMs)
     }
 
     @Test

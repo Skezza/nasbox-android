@@ -24,6 +24,17 @@ The app is built with Kotlin, Jetpack Compose, Room, WorkManager, and SMBJ. It s
 - Supports per-job checksum verification for new uploads, including temp-file writes and remote read-back validation
 - Lets you trigger verification from the Jobs screen, either immediately or on the next scheduled run
 - Builds and re-checks stored checksum baselines for existing backup records, with live verification progress in the dashboard and notifications
+- Exports and imports backup-set metadata through About -> Archive transfer using a single JSON file
+
+## Archive transfer
+
+Use **About -> Archive transfer** to move your NASBox backup catalog to another phone:
+
+- `Export Backup Sets` writes one JSON document with all jobs, referenced servers, and backup records
+- `Import Backup Sets` recreates those backup sets as visible disabled jobs on the new device
+- Imported jobs stay disabled and unscheduled until you review them
+- Server passwords are never exported or imported; re-save imported servers before running those jobs
+- Invalid or unsupported files are rejected without mutating the existing catalog
 
 ## Developer setup
 

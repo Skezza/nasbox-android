@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         RunEntity::class,
         RunLogEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class NasBoxDatabase : RoomDatabase() {

@@ -85,6 +85,8 @@ data class PlanEntity(
     val checksumVerificationEnabled: Boolean = false,
     @ColumnInfo(name = "pending_scheduled_verify")
     val pendingScheduledVerify: Boolean = false,
+    @ColumnInfo(name = "imported_at_epoch_ms")
+    val importedAtEpochMs: Long? = null,
 )
 
 @Entity(

@@ -66,6 +66,7 @@ class NasBoxDatabaseTest {
         assertEquals(serverId, plans.first().serverId)
         assertEquals(false, plans.first().checksumVerificationEnabled)
         assertEquals(false, plans.first().pendingScheduledVerify)
+        assertEquals(null, plans.first().importedAtEpochMs)
     }
 
     @Test
@@ -163,10 +164,44 @@ class NasBoxDatabaseTest {
 
         assertEquals(true, storedPlan?.checksumVerificationEnabled)
         assertEquals(true, storedPlan?.pendingScheduledVerify)
+        assertEquals(null, storedPlan?.importedAtEpochMs)
         assertEquals(10L, storedRecord?.verifiedSizeBytes)
         assertEquals("MD5", storedRecord?.checksumAlgorithm)
         assertEquals("abcd", storedRecord?.checksumValue)
         assertEquals(6L, storedRecord?.checksumVerifiedAtEpochMs)
+    }
+
+    @Test
+    fun importedAtEpochMs_canBeStoredAndRead() = runBlocking {
+        val serverId = database.serverDao().insert(
+            ServerEntity(
+                name = "Server Five",
+                host = "host",
+                shareName = "share",
+                basePath = "root",
+                domain = "",
+                username = "name",
+                credentialAlias = "vault/five",
+            ),
+        )
+
+        val planId = database.planDao().insert(
+            PlanEntity(
+                name = "Imported Plan",
+                sourceAlbum = "",
+                sourceType = "FOLDER",
+                folderPath = "/storage/emulated/0/DCIM",
+                serverId = serverId,
+                directoryTemplate = "",
+                filenamePattern = "",
+                enabled = false,
+                importedAtEpochMs = 1234L,
+            ),
+        )
+
+        val storedPlan = database.planDao().getById(planId)
+
+        assertEquals(1234L, storedPlan?.importedAtEpochMs)
     }
 
     @Test
