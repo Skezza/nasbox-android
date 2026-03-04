@@ -1,52 +1,22 @@
 # NASBox
-
-NASBox is an Android app for backing up local device content to SMB 2/3 network shares.
-
-The app is built with Kotlin, Jetpack Compose, Room, WorkManager, and SMBJ. It supports configuring SMB destinations, creating backup plans, and running archive-only sync jobs for photo albums, general folders, and broad shared-storage backups.
-
-## Visuals
-
-<p align="center">
-  <img src="app/src/main/playstore/icon_512.png" alt="NASBox app icon" width="160" />
+Archive-only sync jobs for photo albums, general folders, and broad shared-storage backups.
+<p align="centre">
+  <img src="app/src/main/playstore/icon_512.png" alt="NASBox app icon" width="100" />
 </p>
 
 ### App screenshots
 
-<p align="center">
+<p align="left">
   <img width="220" alt="about_transfer" src="https://github.com/user-attachments/assets/1c4ad46e-4068-4dd0-baf0-bfc4df732ffe" />
   <img width="220" alt="servers" src="https://github.com/user-attachments/assets/48509751-45d1-4494-929c-a8b772aa94b1" />
   <img width="220" alt="jobs" src="https://github.com/user-attachments/assets/a25d4a8e-e88c-48d9-afa2-81df4ce07abd" />
 </p>
 
-<p align="center">
+<p align="left">
   <img width="220" alt="job_editor" src="https://github.com/user-attachments/assets/769ccd75-ccb0-4744-bd49-35e0cada51b9" />
   <img width="220" alt="dashboard" src="https://github.com/user-attachments/assets/f4e54648-973b-474c-8dc4-b1e47ede6e8b" />
 </p>
 
-
-## What it does
-
-- Stores SMB server definitions with credential support and connection testing
-- Discovers reachable SMB hosts on the local network
-- Browses remote shares before saving a destination
-- Creates backup plans for photo albums, document-tree folders, and shared-storage "full phone" style backups
-- Runs manual backups with persisted run history and per-run counters
-- Deduplicates uploads using persisted backup records
-- Shows active and recent runs from the dashboard, including stop/cancel controls
-- Supports per-job checksum verification for new uploads, including temp-file writes and remote read-back validation
-- Lets you trigger verification from the Jobs screen, either immediately or on the next scheduled run
-- Builds and re-checks stored checksum baselines for existing backup records, with live verification progress in the dashboard and notifications
-- Exports and imports backup-set metadata through About -> Transfer profile using a single JSON file
-
-## Transfer profile
-
-Use **About -> Transfer profile** to move your NASBox backup catalog to another device:
-
-- `Export Profile` writes one JSON document with all jobs, referenced servers, and backup records
-- `Import Porfile` recreates those backup sets as visible disabled jobs on the new device
-- Imported jobs stay disabled and unscheduled until you review them
-- Server passwords are never exported or imported; re-save imported servers before running those jobs
-- Invalid or unsupported files are rejected without mutating the existing catalog
 
 ## Developer setup
 
