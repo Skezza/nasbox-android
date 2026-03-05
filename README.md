@@ -4,20 +4,6 @@ Archive-only sync jobs for photo albums, general folders, and broad shared-stora
   <img src="app/src/main/playstore/icon_512.png" alt="NASBox app icon" width="100" />
 </p>
 
-### App screenshots
-
-<p align="left">
-  <img width="220" alt="about_transfer" src="https://github.com/user-attachments/assets/1c4ad46e-4068-4dd0-baf0-bfc4df732ffe" />
-  <img width="220" alt="servers" src="https://github.com/user-attachments/assets/48509751-45d1-4494-929c-a8b772aa94b1" />
-  <img width="220" alt="jobs" src="https://github.com/user-attachments/assets/a25d4a8e-e88c-48d9-afa2-81df4ce07abd" />
-</p>
-
-<p align="left">
-  <img width="220" alt="job_editor" src="https://github.com/user-attachments/assets/769ccd75-ccb0-4744-bd49-35e0cada51b9" />
-  <img width="220" alt="dashboard" src="https://github.com/user-attachments/assets/f4e54648-973b-474c-8dc4-b1e47ede6e8b" />
-</p>
-
-
 ## Developer setup
 
 Requirements:
