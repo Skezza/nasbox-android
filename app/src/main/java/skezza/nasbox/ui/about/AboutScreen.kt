@@ -139,7 +139,7 @@ fun AboutScreen(
                                 importLauncher.launch(arrayOf("application/json", "text/plain"))
                             },
                         ) {
-                            Text("Import Porfile")
+                            Text("Import Profile")
                         }
                     }
                 }
